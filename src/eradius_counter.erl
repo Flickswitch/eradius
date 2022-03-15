@@ -3,7 +3,8 @@
 
 -module(eradius_counter).
 -export([init_counter/1, init_counter/2, inc_counter/2, dec_counter/2, reset_counter/1, reset_counter/2,
-         inc_request_counter/2, inc_reply_counter/2, observe/4, observe/5]).
+         inc_request_counter/2, inc_reply_counter/2, observe/4, observe/5,
+         set_boolean_metric/3]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -82,6 +83,22 @@ aggregate({Servers, {ResetTS, Nass}}) ->
     NSum1 = [Value || {_Key, Value} <- orddict:to_list(NSums)],
     {Servers, {ResetTS, NSum1}}.
 
+%% @doc Set Value for the given prometheus boolean metric by the given Name with
+%% the given values
+set_boolean_metric(Name, Labels, Value) ->
+    case code:is_loaded(prometheus) of
+        {file, _} ->
+            try
+                prometheus_boolean:set(Name, Labels, Value)
+            catch _:_ ->
+                prometheus_boolean:declare([{name, server_status}, {labels, [server_ip, server_port]},
+                                            {help, "Status of an upstream RADIUS Server"}]),
+                prometheus_boolean:set(Name, Labels, Value)
+            end;
+        _ ->
+            ok
+    end.
+
 %% @doc Update the given histogram metric value
 %% NOTE: We use prometheus_histogram collector here instead of eradius_counter ets table because
 %% it is much easy to use histograms in this way. As we don't need to manage buckets and do
@@ -94,6 +111,7 @@ observe(Name, {{ClientName, ClientIP, _}, {ServerName, ServerIP, ServerPort}} = 
             catch _:_ ->
                     Buckets = application:get_env(eradius, histogram_buckets, [10, 30, 50, 75, 100, 1000, 2000]),
                     prometheus_histogram:declare([{name, Name}, {labels, [server_ip, server_port, server_name, client_name, client_ip]},
+                                                  {duration_unit, milliseconds},
                                                   {buckets, Buckets}, {help, Help}]),
                     observe(Name, MetricsInfo, Value, Help)
             end;
@@ -108,6 +126,7 @@ observe(Name, #nas_prop{server_ip = ServerIP, server_port = ServerPort, nas_ip =
             catch _:_ ->
                     Buckets = application:get_env(eradius, histogram_buckets, [10, 30, 50, 75, 100, 1000, 2000]),
                     prometheus_histogram:declare([{name, Name}, {labels, [server_ip, server_port, server_name, nas_ip, nas_id]},
+                                                  {duration_unit, milliseconds},
                                                   {buckets, Buckets}, {help, Help}]),
                     observe(Name, Nas, Value, ServerName, Help)
             end;

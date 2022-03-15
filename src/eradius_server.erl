@@ -49,7 +49,7 @@
 %%   }).
 %%   '''
 -module(eradius_server).
--export([start_link/3]).
+-export([start_link/3, start_link/4]).
 -export_type([port_number/0, req_id/0]).
 
 %% internal
@@ -69,6 +69,7 @@
 -define(RESEND_TIMEOUT, 5000).          % how long the binary response is kept after sending it on the socket
 -define(RESEND_RETRIES, 3).             % how often a reply may be resent
 -define(HANDLER_REPLY_TIMEOUT, 15000).  % how long to wait before a remote handler is considered dead
+-define(DEFAULT_RADIUS_SERVER_OPTS(IP), [{active, once}, {ip, IP}, binary]).
 
 -type port_number() :: 1..65535.
 -type req_id()      :: byte().
@@ -92,11 +93,14 @@
 -callback radius_request(#radius_request{}, #nas_prop{}, HandlerData :: term()) -> 
     {reply, #radius_request{}} | noreply | {error, timeout}.
 
-%% @private
 -spec start_link(atom(), inet:ip4_address(), port_number()) -> {ok, pid()} | {error, term()}.
-start_link(ServerName, IP = {A,B,C,D}, Port) ->
+start_link(ServerName, IP, Port) ->
+    start_link(ServerName, IP, Port, []).
+
+-spec start_link(atom(), inet:ip4_address(), port_number(), [inet:socket_setopt()]) -> {ok, pid()} | {error, term()}.
+start_link(ServerName, IP = {A,B,C,D}, Port, Opts) ->
     Name = list_to_atom(lists:flatten(io_lib:format("eradius_server_~b.~b.~b.~b:~b", [A,B,C,D,Port]))),
-    gen_server:start_link({local, Name}, ?MODULE, {ServerName, IP, Port}, []).
+    gen_server:start_link({local, Name}, ?MODULE, {ServerName, IP, Port, Opts}, []).
 
 stats(Server, Function) ->
     gen_server:call(Server, {stats, Function}).
@@ -104,10 +108,12 @@ stats(Server, Function) ->
 %% ------------------------------------------------------------------------------------------
 %% -- gen_server Callbacks
 %% @private
-init({ServerName, IP, Port}) ->
+init({ServerName, IP, Port, Opts}) ->
     process_flag(trap_exit, true),
-    RecBuf = application:get_env(eradius, recbuf, 8192),
-    case gen_udp:open(Port, [{active, once}, {ip, IP}, binary, {recbuf, RecBuf}]) of
+    ExtraServerOptions = proplists:get_value(socket_opts, Opts, []),
+    DefaultRecBuf = application:get_env(eradius, recbuf, 8192),
+    ExtraServerOptionsWithBuf = add_recbuf_to_options(DefaultRecBuf, ExtraServerOptions),
+    case gen_udp:open(Port, ?DEFAULT_RADIUS_SERVER_OPTS(IP) ++ ExtraServerOptionsWithBuf) of
         {ok, Socket} ->
             {ok, #state{socket = Socket,
                         ip = IP, port = Port, name = ServerName,
@@ -120,7 +126,7 @@ init({ServerName, IP, Port}) ->
 %% @private
 handle_info(ReqUDP = {udp, Socket, FromIP, FromPortNo, Packet},
             State  = #state{name = ServerName, transacts = Transacts, ip = _IP, port = _Port}) ->
-    TS1 = eradius_lib:timestamp(milli_seconds),
+    TS1 = erlang:monotonic_time(),
     case lookup_nas(State, FromIP, Packet) of
         {ok, ReqID, Handler, NasProp} ->
             #nas_prop{server_ip = ServerIP, server_port = Port} = NasProp,
@@ -164,6 +170,16 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 %% @private
+-spec add_recbuf_to_options(pos_integer(), proplists:proplist()) -> proplists:proplist().
+add_recbuf_to_options(RecBuf, Opts) ->
+    case proplists:get_value(recbuf, Opts) of
+        undefined ->
+            [{recbuf, RecBuf} | Opts];
+        _Val ->
+            Opts
+    end.
+
+%% @private
 terminate(_Reason, State) ->
     gen_udp:close(State#state.socket),
     ok.
@@ -204,7 +220,7 @@ do_radius(ServerPid, ServerName, ReqKey, Handler = {HandlerMod, _}, NasProp, {ud
         {reply, EncReply, {ReqCmd, RespCmd}, Request} ->
             ?LOG(debug, "~s From: ~s INF: Sending response for request ~p",
                         [printable_peer(ServerIP, Port), printable_peer(FromIP, FromPort), ReqKey]),
-            TS2 = eradius_lib:timestamp(milli_seconds),
+            TS2 = erlang:monotonic_time(),
             inc_counter({ReqCmd, RespCmd}, ServerName, NasProp, TS2 - TS1, Request),
             gen_udp:send(Socket, FromIP, FromPort, EncReply),
             case application:get_env(eradius, resend_timeout, 2000) of
