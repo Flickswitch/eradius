@@ -4,7 +4,6 @@ ExistingErlOpts = proplists:get_value(erl_opts, CONFIG, []),
 CONFIG1 =
   try
       persistent_term:info(),
-      io:format("CONFIG: enabling persistent_term support~n"),
       lists:keyreplace(erl_opts, 1, CONFIG,
 		       {erl_opts, [{d, 'HAVE_PERSISTENT_TERM'}|ExistingErlOpts]})
   catch
