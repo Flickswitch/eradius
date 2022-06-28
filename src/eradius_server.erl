@@ -142,7 +142,7 @@ handle_info(ReqUDP = {udp, Socket, FromIP, FromPortNo, Packet},
 
                     ets:insert(Transacts, {ReqKey, {handling, HandlerPid}}),
                     ets:insert(Transacts, {HandlerPid, ReqKey}),
-                    eradius_counter:inc_counter(pending, NasProp);
+                    eradius_counter:inc_counter(pending, NasProp1);
 
                 [{_ReqKey, {handling, HandlerPid}}] ->
                     %% handler process is still working on the request
