@@ -202,7 +202,8 @@ validate_config(Config) ->
         [Server | _] ->
             case Server of
                 {List, SecondList} when is_list(List) and is_list(SecondList) ->
-                    validate_server_config(dedup_keys(Config));
+                    %% validate_server_config(dedup_keys(Config));
+                    validate_server_config(Config);
                 %% Check format of new command
                 {_Name, ServerConf} when is_tuple(ServerConf) ->
                     validate_new_config()
