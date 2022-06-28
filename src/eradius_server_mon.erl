@@ -55,7 +55,7 @@ lookup_handler(IP, Port, NasIP) ->
         [Rec1, Rec2] ->
             Prop1 = (Rec1#nas.prop)#nas_prop{server_ip = IP, server_port = Port},
             Prop2 = (Rec2#nas.prop)#nas_prop{server_ip = IP, server_port = Port},
-            {ok, Rec#nas.handler, Prop1, Prop2};
+            {ok, Rec1#nas.handler, Prop1, Prop2};
         [Rec] ->
             Prop = (Rec#nas.prop)#nas_prop{server_ip = IP, server_port = Port},
             {ok, Rec#nas.handler, Prop}
