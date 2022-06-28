@@ -202,8 +202,7 @@ validate_config(Config) ->
         [Server | _] ->
             case Server of
                 {List, SecondList} when is_list(List) and is_list(SecondList) ->
-                    %% validate_server_config(dedup_keys(Config));
-                    validate_server_config(Config);
+                    validate_server_config(dedup_keys(Config));
                 %% Check format of new command
                 {_Name, ServerConf} when is_tuple(ServerConf) ->
                     validate_new_config()
@@ -312,6 +311,8 @@ validate_secret(Secret) when is_list(Secret) ->
     unicode:characters_to_binary(Secret);
 validate_secret(Secret) when is_binary(Secret) ->
     Secret;
+validate_secret({Secret, Secret2}) when is_binary(Secret) and is_binary(Secret2) ->
+    {Secret, Secret2};
 validate_secret(OtherTerm) ->
     {invalid, io_lib:format("bad RADIUS secret: ~p", [OtherTerm])}.
 

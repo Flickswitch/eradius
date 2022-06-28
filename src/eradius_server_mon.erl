@@ -115,7 +115,6 @@ configure(#state{running = Running}) ->
             ?LOG(error, "Invalid server config, ~s", [Message]),
             {error, invalid_config};
         ServList -> %% list of {ServerName, ServerAddr, NasHandler} tuples
-            ?LOG(error, "serve_list, ~s", [ServList]),
             NasList = lists:flatmap(fun(Server) -> server_naslist(Server) end, ServList),
             Tab = ets:tab2list(?NAS_TAB),
             ToDelete = Tab -- NasList,
