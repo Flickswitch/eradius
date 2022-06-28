@@ -131,7 +131,8 @@ handle_info(ReqUDP = {udp, Socket, FromIP, FromPortNo, Packet},
         {ok, ReqID, Handler, NasProp1, NasProp2} ->
             #nas_prop{server_ip = ServerIP, server_port = Port} = NasProp1,
             ReqKey = {FromIP, FromPortNo, ReqID},
-            NNasProp = NasProp#nas_prop{nas_port = FromPortNo},
+            NNasProp1 = NasProp1#nas_prop{nas_port = FromPortNo},
+            NNasProp2 = NasProp2#nas_prop{nas_port = FromPortNo},
             eradius_counter:inc_counter(requests, NasProp1),
 
             case ets:lookup(Transacts, ReqKey) of
