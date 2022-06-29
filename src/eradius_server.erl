@@ -128,38 +128,6 @@ handle_info(ReqUDP = {udp, Socket, FromIP, FromPortNo, Packet},
             State  = #state{name = ServerName, transacts = Transacts, ip = _IP, port = _Port}) ->
     TS1 = erlang:monotonic_time(),
     case lookup_nas(State, FromIP, Packet) of
-        {ok, ReqID, Handler, NasProp1, NasProp2} ->
-            #nas_prop{server_ip = ServerIP, server_port = Port} = NasProp1,
-            ReqKey = {FromIP, FromPortNo, ReqID},
-            NNasProp1 = NasProp1#nas_prop{nas_port = FromPortNo},
-            NNasProp2 = NasProp2#nas_prop{nas_port = FromPortNo},
-            eradius_counter:inc_counter(requests, NasProp1),
-
-            case ets:lookup(Transacts, ReqKey) of
-                [] ->
-                    HandlerPid = proc_lib:spawn_link(?MODULE, do_radius, [self(), ServerName, ReqKey, Handler, NNasProp1, ReqUDP, TS1]),
-                    HandlerPid = proc_lib:spawn_link(?MODULE, do_radius, [self(), ServerName, ReqKey, Handler, NNasProp2, ReqUDP, TS1]),
-
-                    ets:insert(Transacts, {ReqKey, {handling, HandlerPid}}),
-                    ets:insert(Transacts, {HandlerPid, ReqKey}),
-                    eradius_counter:inc_counter(pending, NasProp1);
-
-                [{_ReqKey, {handling, HandlerPid}}] ->
-                    %% handler process is still working on the request
-                    ?LOG(debug, "~s From: ~s INF: Handler process ~p is still working on the request. duplicate request (being handled) ~p",
-                        [printable_peer(ServerIP, Port), printable_peer(FromIP, FromPortNo), HandlerPid, ReqKey]),
-                    eradius_counter:inc_counter(dupRequests, NasProp1);
-
-                [{_ReqKey, {replied, HandlerPid}}] ->
-                    %% handler process waiting for resend message
-                    HandlerPid ! {self(), resend, Socket},
-                    ?LOG(debug, "~s From: ~s INF: Handler ~p waiting for resent message. duplicate request (resent) ~p",
-                         [printable_peer(ServerIP, Port), printable_peer(FromIP, FromPortNo), HandlerPid, ReqKey]),
-                    eradius_counter:inc_counter(dupRequests, NasProp1),
-                    eradius_counter:inc_counter(retransmissions, NasProp1)
-            end,
-            NewState = State;
-
         {ok, ReqID, Handler, NasProp} ->
             #nas_prop{server_ip = ServerIP, server_port = Port} = NasProp,
             ReqKey = {FromIP, FromPortNo, ReqID},
@@ -233,8 +201,6 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 -spec lookup_nas(#state{}, inet:ip_address(), binary()) -> {ok, req_id(), eradius_server_mon:handler(), #nas_prop{}} | {discard, invalid | malformed}.
 lookup_nas(#state{ip = IP, port = Port}, NasIP, <<_Code, ReqID, _/binary>>) ->
     case eradius_server_mon:lookup_handler(IP, Port, NasIP) of
-        {ok, Handler, NasProp1, NasProp2} ->
-            {ok, ReqID, Handler, NasProp1, NasProp2};
         {ok, Handler, NasProp} ->
             {ok, ReqID, Handler, NasProp};
         {error, not_found} ->
