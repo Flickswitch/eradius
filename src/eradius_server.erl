@@ -296,14 +296,11 @@ run_remote_handler(Node, {HandlerMod, HandlerArgs}, NasProp, EncRequest) ->
 %% @private
 -spec handle_request(eradius_server_mon:handler(), #nas_prop{}, binary()) -> any().
 handle_request({HandlerMod, HandlerArg}, #nas_prop{secret = {Secret1, Secret2}, nas_ip = ServerIP, nas_port = Port}, EncRequest) ->
-    ?LOG(error, "299: ~s ~s", [Secret1, Secret2]),
     case handle_request({HandlerMod, HandlerArg}, #nas_prop{secret = Secret1, nas_ip = ServerIP, nas_port = Port}, EncRequest) of
         {discard, _} ->
-            ?LOG(error, "302"),
             handle_request({HandlerMod, HandlerArg}, #nas_prop{secret = Secret2, nas_ip = ServerIP, nas_port = Port}, EncRequest);
-        other ->
-            ?LOG(error, "305"),
-            other
+        Other ->
+            Other
     end;
 
 handle_request({HandlerMod, HandlerArg}, NasProp = #nas_prop{secret = Secret, nas_ip = ServerIP, nas_port = Port}, EncRequest) ->
