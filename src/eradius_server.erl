@@ -93,6 +93,18 @@
 -callback radius_request(#radius_request{}, #nas_prop{}, HandlerData :: term()) -> 
     {reply, #radius_request{}} | noreply | {error, timeout}.
 
+-telemetry_event #{
+                   event => [eradius, request],
+                   description => <<"Emitted after request">>,
+                   measurements => <<"#{duration => non_neg_integer()}">>,
+                   metadata => <<"#{}">>
+                  }.
+-telemetry_event #{
+                   event => [eradius, request, access],
+                   description => <<"Emitted after Access request">>,
+                   measurements => <<"#{duration => non_neg_integer()}">>,
+                   metadata => <<"#{}">>
+                  }.
 -spec start_link(atom(), inet:ip4_address(), port_number()) -> {ok, pid()} | {error, term()}.
 start_link(ServerName, IP, Port) ->
     start_link(ServerName, IP, Port, []).
@@ -371,62 +383,87 @@ apply_handler_mod(HandlerMod, HandlerArg, Request, NasProp) ->
             {exit, {Class, Reason}}
     end.
 
+
 inc_counter({ReqCmd, RespCmd}, ServerName, NasProp, Ms, Request) ->
     inc_request_counter(ReqCmd, ServerName, NasProp, Ms, Request),
-    inc_reply_counter(RespCmd, NasProp, Request).
+    inc_reply_counter(RespCmd, ServerName, NasProp, Ms, Request).
 
 inc_request_counter(request, ServerName, NasProp, Ms, _) ->
     eradius_counter:observe(eradius_request_duration_milliseconds,
                             NasProp, Ms, ServerName, "RADIUS request exeuction time"),
     eradius_counter:observe(eradius_access_request_duration_milliseconds,
                             NasProp, Ms, ServerName, "Access-Request execution time"),
+    eradius_counter:measure([eradius, request], #{duration => Ms}, NasProp, ServerName),
+    eradius_counter:measure([eradius, request, access], #{duration => Ms}, NasProp, ServerName),
     eradius_counter:inc_request_counter(accessRequests, NasProp);
 inc_request_counter(accreq, ServerName, NasProp, Ms, Request) ->
     eradius_counter:observe(eradius_request_duration_milliseconds,
                             NasProp, Ms, ServerName, "RADIUS request exeuction time"),
     eradius_counter:observe(eradius_accounting_request_duration_milliseconds,
                             NasProp, Ms, ServerName, "Accounting-Request execution time"),
+    eradius_counter:measure([eradius, request], #{duration => Ms}, NasProp, ServerName),
+    eradius_counter:measure([eradius, request, accounting], #{duration => Ms}, NasProp, ServerName),
     inc_request_counter_accounting(NasProp, Request);
 inc_request_counter(coareq, ServerName, NasProp, Ms, _) ->
     eradius_counter:observe(eradius_request_duration_milliseconds,
                             NasProp, Ms, ServerName, "RADIUS request exeuction time"),
     eradius_counter:observe(eradius_coa_request_duration_milliseconds,
                             NasProp, Ms, ServerName, "Coa-Request execution time"),
+    eradius_counter:measure([eradius, request], #{duration => Ms}, NasProp, ServerName),
+    eradius_counter:measure([eradius, request, coa_request], #{duration => Ms}, NasProp, ServerName),
     eradius_counter:inc_request_counter(coaRequests, NasProp);
 inc_request_counter(discreq, ServerName, NasProp, Ms, _) ->
     eradius_counter:observe(eradius_request_duration_milliseconds,
                             NasProp, Ms, ServerName, "RADIUS request exeuction time"),
     eradius_counter:observe(eradius_disconnect_request_duration_milliseconds,
                             NasProp, Ms, ServerName, "Disconnect-Request execution time"),
+    eradius_counter:measure([eradius, request], #{duration => Ms}, NasProp, ServerName),
+    eradius_counter:measure([eradius, request, disconnect_request], #{duration => Ms}, NasProp, ServerName),
     eradius_counter:inc_request_counter(discRequests, NasProp);
 inc_request_counter(_Cmd, _ServerName, _NasProp, _Ms, _Request) ->
     ok.
 
-inc_reply_counter(accept, NasProp, _) ->
+inc_reply_counter(accept, ServerName, NasProp, Ms, _) ->
     eradius_counter:inc_counter(replies, NasProp),
+    eradius_counter:measure([eradius, replies], #{duration => Ms}, NasProp, ServerName),
+    eradius_counter:measure([eradius, replies, accept], #{duration => Ms}, NasProp, ServerName),
     eradius_counter:inc_reply_counter(accessAccepts, NasProp);
-inc_reply_counter(reject, NasProp, _) ->
+inc_reply_counter(reject, ServerName, NasProp, Ms, _) ->
     eradius_counter:inc_counter(replies, NasProp),
+    eradius_counter:measure([eradius, replies], #{duration => Ms}, NasProp, ServerName),
+    eradius_counter:measure([eradius, replies, reject], #{duration => Ms}, NasProp, ServerName),
     eradius_counter:inc_reply_counter(accessRejects, NasProp);
-inc_reply_counter(challenge, NasProp, _) ->
+inc_reply_counter(challenge, ServerName, NasProp, Ms, _) ->
     eradius_counter:inc_counter(replies, NasProp),
+    eradius_counter:measure([eradius, replies], #{duration => Ms}, NasProp, ServerName),
+    eradius_counter:measure([eradius, replies, challenge], #{duration => Ms}, NasProp, ServerName),
     eradius_counter:inc_reply_counter(accessChallenges, NasProp);
-inc_reply_counter(accresp, NasProp, Request) ->
+inc_reply_counter(accresp, ServerName, NasProp, Ms, Request) ->
     eradius_counter:inc_counter(replies, NasProp),
+    eradius_counter:measure([eradius, replies], #{duration => Ms}, NasProp, ServerName),
+    eradius_counter:measure([eradius, replies, accounting_response], #{duration => Ms}, NasProp, ServerName),
     inc_response_counter_accounting(NasProp, Request);
-inc_reply_counter(coaack, NasProp, _) ->
+inc_reply_counter(coaack, ServerName, NasProp, Ms, _) ->
     eradius_counter:inc_counter(replies, NasProp),
+    eradius_counter:measure([eradius, replies], #{duration => Ms}, NasProp, ServerName),
+    eradius_counter:measure([eradius, replies, coa_ack], #{duration => Ms}, NasProp, ServerName),
     eradius_counter:inc_reply_counter(coaAcks, NasProp);
-inc_reply_counter(coanak, NasProp, _) ->
+inc_reply_counter(coanak, ServerName, NasProp, Ms, _) ->
     eradius_counter:inc_counter(replies, NasProp),
+    eradius_counter:measure([eradius, replies], #{duration => Ms}, NasProp, ServerName),
+    eradius_counter:measure([eradius, replies, coa_nak], #{duration => Ms}, NasProp, ServerName),
     eradius_counter:inc_reply_counter(coaNaks, NasProp);
-inc_reply_counter(discack, NasProp, _) ->
+inc_reply_counter(discack, ServerName, NasProp, Ms, _) ->
     eradius_counter:inc_counter(replies, NasProp),
+    eradius_counter:measure([eradius, replies], #{duration => Ms}, NasProp, ServerName),
+    eradius_counter:measure([eradius, replies, disc_ack], #{duration => Ms}, NasProp, ServerName),
     eradius_counter:inc_reply_counter(discAcks, NasProp);
-inc_reply_counter(discnak, NasProp, _) ->
+inc_reply_counter(discnak, ServerName, NasProp, Ms, _) ->
     eradius_counter:inc_counter(replies, NasProp),
+    eradius_counter:measure([eradius, replies], #{duration => Ms}, NasProp, ServerName),
+    eradius_counter:measure([eradius, replies, disc_nak], #{duration => Ms}, NasProp, ServerName),
     eradius_counter:inc_reply_counter(discNaks, NasProp);
-inc_reply_counter(_Cmd, _NasProp, _Request) ->
+inc_reply_counter(_Cmd, _ServerName, _NasProp, _Ms, _Request) ->
     ok.
 
 inc_request_counter_accounting(NasProp, #radius_request{attrs = Attrs}) ->
@@ -444,12 +481,16 @@ inc_response_counter_accounting(_, _) ->
     ok.
 
 inc_discard_counter(bad_authenticator, NasProp) ->
+    eradius_counter:measure([eradius, bad_authenticator], #{count => 1}, NasProp),
     eradius_counter:inc_counter(badAuthenticators, NasProp);
 inc_discard_counter(unknown_req_type, NasProp) ->
+    eradius_counter:measure([eradius, unknown_req_type], #{count => 1}, NasProp),
     eradius_counter:inc_counter(unknownTypes, NasProp);
 inc_discard_counter(malformed, NasProp) ->
+    eradius_counter:measure([eradius, malformed_request], #{count => 1}, NasProp),
     eradius_counter:inc_counter(malformedRequests, NasProp);
 inc_discard_counter(_Reason, NasProp) ->
+    eradius_counter:measure([eradius, packets_dropped], #{count => 1}, NasProp),
     eradius_counter:inc_counter(packetsDropped, NasProp).
 
 %% check if we can use persistent_term for config

@@ -3,8 +3,8 @@
 
 -module(eradius_counter).
 -export([init_counter/1, init_counter/2, inc_counter/2, dec_counter/2, reset_counter/1, reset_counter/2,
-         inc_request_counter/2, inc_reply_counter/2, observe/4, observe/5,
-         set_boolean_metric/3]).
+         inc_request_counter/2, inc_reply_counter/2, observe/4, observe/5, measure/4,
+         set_boolean_metric/3, handle_event/4]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -21,6 +21,12 @@
 -type nas_counters() :: {erlang:timestamp(), [#nas_counter{}]}.
 -type stats() :: {srv_counters(), nas_counters()}.
 
+-include_lib("kernel/include/logger.hrl").
+
+handle_event(Event, Measurements, Metadata, _Config) ->
+  ?LOG_INFO("Event: ~p", [Event]),
+  ?LOG_INFO("Measurements: ~p", [Measurements]),
+  ?LOG_INFO("Metadata: ~p", [Metadata]).
 %% ------------------------------------------------------------------------------------------
 %% API
 %% @doc initialize a counter structure
@@ -134,6 +140,9 @@ observe(Name, #nas_prop{server_ip = ServerIP, server_port = ServerPort, nas_ip =
             ok
     end.
 
+measure(Name, Value, #nas_prop{server_ip = ServerIP, server_port = ServerPort, nas_ip = NasIP, nas_id = NasId} = _Nas, ServerName) ->
+    telemetry:execute(Name, Value, #{server_name => ServerName, server_ip => inet:ntoa(ServerIP), server_port => ServerPort, server_name => ServerName, nas_ip => inet:ntoa(NasIP), nas_id => NasId}).
+
 %% helper to be called from the aggregator to fetch this nodes values
 %% @private
 collect(Ref, Process) ->
@@ -149,6 +158,19 @@ start_link() ->
 %% -- gen_server Callbacks
 %% @private
 init([]) ->
+    ok = telemetry:attach_many(
+  <<"eradius-log-response-handler">>,
+  [
+    [eradius, request],
+    [eradius, request, start],
+    [eradius, request, accounting],
+    [eradius, replies],
+    [eradius, replies, accept],
+    [eradius, replies, reject]
+  ],
+  fun eradius_counter:handle_event/4,
+  []
+),
     ets:new(?MODULE, [ordered_set, protected, named_table, {keypos, #nas_counter.key}, {write_concurrency,true}]),
     eradius:modules_ready([?MODULE]),
     {ok, #state{reset = eradius_lib:timestamp()}}.

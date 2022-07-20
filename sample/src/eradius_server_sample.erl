@@ -6,7 +6,8 @@
 -export([start/2,
          stop/1,
          radius_request/3,
-         test/0]).
+         test/0,
+         do_test/1]).
 
 -include_lib("eradius/include/eradius_lib.hrl").
 -include_lib("eradius/include/dictionary.hrl").
