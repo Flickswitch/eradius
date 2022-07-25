@@ -3,7 +3,7 @@
 
 -module(eradius_counter).
 -export([init_counter/1, init_counter/2, inc_counter/2, dec_counter/2, reset_counter/1, reset_counter/2,
-         inc_request_counter/2, inc_reply_counter/2, observe/4, observe/5, measure/4,
+         inc_request_counter/2, inc_reply_counter/2, observe/4, observe/5, measure/3, measure/4,
          set_boolean_metric/3, handle_event/4]).
 
 -behaviour(gen_server).
@@ -142,6 +142,8 @@ observe(Name, #nas_prop{server_ip = ServerIP, server_port = ServerPort, nas_ip =
 
 measure(Name, Value, #nas_prop{server_ip = ServerIP, server_port = ServerPort, nas_ip = NasIP, nas_id = NasId} = _Nas, ServerName) ->
     telemetry:execute(Name, Value, #{server_name => ServerName, server_ip => inet:ntoa(ServerIP), server_port => ServerPort, server_name => ServerName, nas_ip => inet:ntoa(NasIP), nas_id => NasId}).
+measure(Name, Value, #nas_prop{server_ip = ServerIP, server_port = ServerPort, nas_ip = NasIP, nas_id = NasId} = _Nas) ->
+    telemetry:execute(Name, Value, #{server_name => ServerName, server_ip => inet:ntoa(ServerIP), server_port => ServerPort, nas_ip => inet:ntoa(NasIP), nas_id => NasId}).
 
 %% helper to be called from the aggregator to fetch this nodes values
 %% @private
