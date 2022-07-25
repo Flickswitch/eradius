@@ -141,9 +141,9 @@ observe(Name, #nas_prop{server_ip = ServerIP, server_port = ServerPort, nas_ip =
     end.
 
 measure(Name, Value, #nas_prop{server_ip = ServerIP, server_port = ServerPort, nas_ip = NasIP, nas_id = NasId} = _Nas, ServerName) ->
-    telemetry:execute(Name, Value, #{server_name => ServerName, server_ip => inet:ntoa(ServerIP), server_port => ServerPort, server_name => ServerName, nas_ip => inet:ntoa(NasIP), nas_id => NasId}).
+    telemetry:execute(Name, Value, #{server_ip => inet:ntoa(ServerIP), server_port => ServerPort, server_name => ServerName, nas_ip => inet:ntoa(NasIP), nas_id => NasId}).
 measure(Name, Value, #nas_prop{server_ip = ServerIP, server_port = ServerPort, nas_ip = NasIP, nas_id = NasId} = _Nas) ->
-    telemetry:execute(Name, Value, #{server_name => ServerName, server_ip => inet:ntoa(ServerIP), server_port => ServerPort, nas_ip => inet:ntoa(NasIP), nas_id => NasId}).
+    telemetry:execute(Name, Value, #{server_ip => inet:ntoa(ServerIP), server_port => ServerPort, nas_ip => inet:ntoa(NasIP), nas_id => NasId}).
 
 %% helper to be called from the aggregator to fetch this nodes values
 %% @private
