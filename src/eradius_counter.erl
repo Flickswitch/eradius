@@ -52,11 +52,33 @@ inc_counter(discardNoHandler, Counters = #server_counter{discardNoHandler = Valu
 inc_counter(Counter, Nas = #nas_prop{}) ->
     gen_server:cast(?MODULE, {inc_counter, Counter, Nas});
 inc_counter(Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp, ServerPort}}) ->
+    Events = [eradius, inc_counter, Counter],
+    Measurements = #{},
+    Metadata = #{
+                 client_name => ClientName,
+                 client_ip => ClientIP,
+                 client_port => ClientPort,
+                 server_name => ServerName,
+                 server_ip => ServerIp,
+                 server_port => ServerPort
+                },
+    telemetry:execute(Events, Measurements, Metadata),
     gen_server:cast(?MODULE, {inc_counter, Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp, ServerPort}}}).
 
 dec_counter(Counter, Nas = #nas_prop{}) ->
     gen_server:cast(?MODULE, {dec_counter, Counter, Nas});
 dec_counter(Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp, ServerPort}}) ->
+    Events = [eradius, dec_counter, Counter],
+    Measurements = #{},
+    Metadata = #{
+                 client_name => ClientName,
+                 client_ip => ClientIP,
+                 client_port => ClientPort,
+                 server_name => ServerName,
+                 server_ip => ServerIp,
+                 server_port => ServerPort
+                },
+    telemetry:execute(Events, Measurements, Metadata),
     gen_server:cast(?MODULE, {dec_counter, Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp, ServerPort}}}).
 
 %% @doc reset all counters to zero
@@ -104,6 +126,10 @@ set_boolean_metric(Name, Labels, Value) ->
 %% it is much easy to use histograms in this way. As we don't need to manage buckets and do
 %% the other histogram things in eradius, but prometheus.erl will do it for us
 observe(Name, {{ClientName, ClientIP, _}, {ServerName, ServerIP, ServerPort}} = MetricsInfo, Value, Help) ->
+    Events = [eradius, observe, Name],
+    Measurements = #{value => Value},
+    Metadata = #{server_name => ServerName, server_ip => ServerIP, server_port => ServerPort, client_name => ClientName, client_ip => ClientIP},
+    telemetry:execute(Events, Measurements, Metadata),
     case code:is_loaded(prometheus) of
         {file, _} ->
             try
@@ -119,6 +145,10 @@ observe(Name, {{ClientName, ClientIP, _}, {ServerName, ServerIP, ServerPort}} = 
             ok
     end.
 observe(Name, #nas_prop{server_ip = ServerIP, server_port = ServerPort, nas_ip = NasIP, nas_id = NasId} = Nas, Value, ServerName, Help) ->
+    Events = [eradius, observe, Name],
+    Measurements = #{value => Value},
+    Metadata = #{server_name => ServerName, server_ip => ServerIP, server_port => ServerPort, nas_ip => NasIP, nas_id => NasId},
+    telemetry:execute(Events, Measurements, Metadata),
     case code:is_loaded(prometheus) of
         {file, _} ->
             try
