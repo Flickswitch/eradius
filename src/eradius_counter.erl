@@ -108,6 +108,10 @@ aggregate({Servers, {ResetTS, Nass}}) ->
 %% @doc Set Value for the given prometheus boolean metric by the given Name with
 %% the given values
 set_boolean_metric(Name, Labels, Value) ->
+    Events = [eradius, boolean, Name],
+    Measurements = #{value => Value},
+    Metadata = #{labels => Labels},
+    telemetry:execute(Events, Measurements, Metadata),
     case code:is_loaded(prometheus) of
         {file, _} ->
             try
