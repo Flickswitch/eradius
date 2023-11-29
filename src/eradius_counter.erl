@@ -50,10 +50,14 @@ inc_counter(invalidRequests,  Counters = #server_counter{invalidRequests  = Valu
 inc_counter(discardNoHandler, Counters = #server_counter{discardNoHandler = Value}) ->
     Counters#server_counter{discardNoHandler = Value + 1};
 inc_counter(Counter, Nas = #nas_prop{}) ->
+    Events = [eradius, inc_counter, Counter],
+    Measurements = #{value => 1},
+    Metadata = #{nas => Nas},
+    telemetry:execute(Events, Measurements, Metadata),
     gen_server:cast(?MODULE, {inc_counter, Counter, Nas});
 inc_counter(Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp, ServerPort}}) ->
     Events = [eradius, inc_counter, Counter],
-    Measurements = #{},
+    Measurements = #{value => 1},
     Metadata = #{
                  client_name => ClientName,
                  client_ip => ClientIP,
@@ -68,8 +72,8 @@ inc_counter(Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp,
 dec_counter(Counter, Nas = #nas_prop{}) ->
     gen_server:cast(?MODULE, {dec_counter, Counter, Nas});
 dec_counter(Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp, ServerPort}}) ->
-    Events = [eradius, dec_counter, Counter],
-    Measurements = #{},
+    Events = [eradius, inc_counter, Counter],
+    Measurements = #{value => -1},
     Metadata = #{
                  client_name => ClientName,
                  client_ip => ClientIP,
