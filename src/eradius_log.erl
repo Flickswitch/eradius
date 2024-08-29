@@ -139,7 +139,8 @@ format_message(Time, Sender, Request) ->
     BinSender = format_sender(Sender),
     BinCommand = format_cmd(Request#radius_request.cmd),
     BinPacket = format_packet(Request),
-    <<BinTStamp/binary, " ", BinSender/binary, " ", BinCommand/binary, "\n", BinPacket/binary, "\n">>.
+    %% Updated log format to include packet on the same line
+    <<BinTStamp/binary, " - ", BinSender/binary, " - ", BinCommand/binary, " - ", BinPacket/binary, "\n">>.
 
 format_sender({NASIP, NASPort, ReqID}) ->
     <<(format_ip(NASIP))/binary, $:, (i2b(NASPort))/binary, " [", (i2b(ReqID))/binary, $]>>.
@@ -162,6 +163,10 @@ format_ip(IP) ->
 
 format_packet(Request) ->
     Attrs = Request#radius_request.attrs,
+    %% Updated log format to one line
+    << "Packet: ", (print_attrs(Attrs))/binary >>.
+
+print_attrs(Attrs) ->
     << <<(print_attr(Key, Val))/binary>> || {Key, Val} <- Attrs >>.
 
 print_attr(Key = #attribute{name = Attr, type = Type}, InVal) ->
@@ -242,11 +247,9 @@ collectable_attr_value(_Attr, <<Val/binary>>) ->
 collectable_attr_value(_Attr, Val) ->
     io_lib:format("~p", [Val]).
 
-radius_date({{YYYY,MM,DD},{Hour,Min,Sec}}) ->
-    DayNumber = calendar:day_of_the_week(YYYY, MM, DD),
-    list_to_binary(
-        io_lib:format("~s ~3.s ~2.2.0w ~2.2.0w:~2.2.0w:~2.2.0w ~4.4.0w",
-            [day(DayNumber), month(MM), DD, Hour, Min, Sec, YYYY])).
+radius_date({{YYYY, MM, DD}, {Hour, Min, Sec}}) ->
+    %% Updated to return ISO 8601 format
+    list_to_binary(io_lib:fwrite("~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0BZ", [YYYY, MM, DD, Hour, Min, Sec])).
 
 format_unknown({VendId, Id}) ->
     case eradius_dict:lookup(vendor, VendId) of
@@ -262,26 +265,6 @@ escape_char($") -> <<"\\\"">>;
 escape_char(C) when C >= 32, C < 127 -> <<C>>;
 escape_char(C) -> <<"\\", (i2b(C))/binary>>.
 
-day(1) -> "Mon";
-day(2) -> "Tue";
-day(3) -> "Wed";
-day(4) -> "Thu";
-day(5) -> "Fri";
-day(6) -> "Sat";
-day(7) -> "Sun".
-
-month(1) -> "Jan";
-month(2) -> "Feb";
-month(3) -> "Mar";
-month(4) -> "Apr";
-month(5) -> "May";
-month(6) -> "Jun";
-month(7) -> "Jul";
-month(8) -> "Aug";
-month(9) -> "Sep";
-month(10) -> "Oct";
-month(11) -> "Nov";
-month(12) -> "Dec".
 
 -compile({inline, i2b/1}).
 i2b(I) -> list_to_binary(integer_to_list(I)).
