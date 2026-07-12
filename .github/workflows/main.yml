@@ -23,8 +23,7 @@ jobs:
       OPENSSL_CONF: ${{ github.workspace }}/priv/openssl-legacy.cnf
     steps:
     - name: Checkout
-      # actions/checkout@v4.2.2
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      uses: actions/checkout@v4
     - name: Prepare
       run: |
            set -euo pipefail
@@ -67,8 +66,7 @@ jobs:
       run: DEBUG=1 rebar3 as test coveralls send || /bin/true
     - name: Archive Test Output
       if: ${{ always() }}
-      # actions/upload-artifact@v4.6.2
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@v4
       with:
         name: test-output-${{ matrix.otp }}
         path: |
@@ -81,8 +79,7 @@ jobs:
     if: always()
     steps:
     - name: Slack notification
-      # 8398a7/action-slack@v3.19.0
-      uses: 8398a7/action-slack@77eaa4f1c608a7d68b38af4e3f739dcd8cba273e
+      uses: 8398a7/action-slack@v3
       with:
         author_name: "GitHub Actions"
         username: ${{ github.event.repository.name }}

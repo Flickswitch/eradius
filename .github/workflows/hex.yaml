@@ -18,8 +18,7 @@ jobs:
            apk --no-cache add gcc git libc-dev libc-utils libgcc linux-headers make bash \
                               musl-dev musl-utils ncurses-dev pcre2 pkgconf scanelf wget zlib
     - name: Checkout
-      # actions/checkout@v4.2.2
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      uses: actions/checkout@v4
     - name: Publish to Hex.pm
       env:
         HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
