@@ -110,10 +110,12 @@ stats(Server, Function) ->
 %% @private
 init({ServerName, IP, Port, Opts}) ->
     process_flag(trap_exit, true),
-    ExtraServerOptions = proplists:get_value(socket_opts, Opts, []),
-    DefaultRecBuf = application:get_env(eradius, recbuf, 8192),
-    ExtraServerOptionsWithBuf = add_recbuf_to_options(DefaultRecBuf, ExtraServerOptions),
-    case gen_udp:open(Port, ?DEFAULT_RADIUS_SERVER_OPTS(IP) ++ ExtraServerOptionsWithBuf) of
+    logger:set_process_metadata(#{domain => [eradius]}),
+    SockOpts0 = proplists:get_value(socket_opts, Opts, []),
+    SockOpts1 = add_sock_opt(recbuf, 8192, SockOpts0),
+    SockOpts = add_sock_opt(sndbuf, 131072, SockOpts1),
+    SockOptsDef = ?DEFAULT_RADIUS_SERVER_OPTS(IP) ++ SockOpts,
+    case gen_udp:open(Port, SockOptsDef) of
         {ok, Socket} ->
             {ok, #state{socket = Socket,
                         ip = IP, port = Port, name = ServerName,
@@ -170,11 +172,12 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 %% @private
--spec add_recbuf_to_options(pos_integer(), proplists:proplist()) -> proplists:proplist().
-add_recbuf_to_options(RecBuf, Opts) ->
-    case proplists:get_value(recbuf, Opts) of
+-spec add_sock_opt(recbuf | sndbuf, pos_integer(), proplists:proplist()) -> proplists:proplist().
+add_sock_opt(OptName, Default, Opts) ->
+    case proplists:get_value(OptName, Opts) of
         undefined ->
-            [{recbuf, RecBuf} | Opts];
+            Buf = application:get_env(eradius, OptName, Default),
+            [{OptName, Buf} | Opts];
         _Val ->
             Opts
     end.
@@ -355,7 +358,7 @@ apply_handler_mod(HandlerMod, HandlerArg, Request, NasProp) ->
             ReqId = integer_to_list(Request#radius_request.reqid),
             S = {NasProp#nas_prop.nas_ip, NasProp#nas_prop.nas_port, Request#radius_request.reqid},
             NAS = eradius_lib:get_attr(Request, ?NAS_Identifier),
-            NAS_IP = inet_parse:ntoa(NasProp#nas_prop.nas_ip),
+            NAS_IP = inet:ntoa(NasProp#nas_prop.nas_ip),
             ?LOG(error, "~s INF: Timeout after waiting for response to ~s(~s) from RADIUS NAS: ~s NAS_IP:~s",
                  [printable_peer(ServerIP, Port), ReqType, ReqId, NAS, NAS_IP],
                  maps:from_list(eradius_log:collect_meta(S, Request))),
@@ -452,12 +455,6 @@ inc_discard_counter(malformed, NasProp) ->
 inc_discard_counter(_Reason, NasProp) ->
     eradius_counter:inc_counter(packetsDropped, NasProp).
 
-%% check if we can use persistent_term for config
-%% persistent term was added in OTP 21.2 but we can't
-%% check minor versions with macros so we're stuck waiting
-%% for OTP 22
--ifdef(HAVE_PERSISTENT_TERM).
-
 server_request_counter_account_match_spec_compile() ->
     case persistent_term:get({?MODULE, ?FUNCTION_NAME}, undefined) of
         undefined ->
@@ -483,19 +480,3 @@ server_response_counter_account_match_spec_compile() ->
         MatchSpecCompile ->
             MatchSpecCompile
     end.
-
--else.
-
-server_request_counter_account_match_spec_compile() ->
-    ets:match_spec_compile(ets:fun2ms(fun
-        ({#attribute{id = ?RStatus_Type}, ?RStatus_Type_Start})  -> accountRequestsStart;
-        ({#attribute{id = ?RStatus_Type}, ?RStatus_Type_Stop})   -> accountRequestsStop;
-        ({#attribute{id = ?RStatus_Type}, ?RStatus_Type_Update}) -> accountRequestsUpdate end)).
-
-server_response_counter_account_match_spec_compile() ->
-    ets:match_spec_compile(ets:fun2ms(fun
-        ({#attribute{id = ?RStatus_Type}, ?RStatus_Type_Start})  -> accountResponsesStart;
-        ({#attribute{id = ?RStatus_Type}, ?RStatus_Type_Stop})   -> accountResponsesStop;
-        ({#attribute{id = ?RStatus_Type}, ?RStatus_Type_Update}) -> accountResponsesUpdate end)).
-
--endif.

@@ -46,12 +46,15 @@ inc_reply_counter(Counter, Nas) ->
 
 %% @doc increment a specific counter value
 inc_counter(invalidRequests,  Counters = #server_counter{invalidRequests  = Value}) ->
+    emit_server_counter(inc_counter, invalidRequests, Counters),
     Counters#server_counter{invalidRequests  = Value + 1};
 inc_counter(discardNoHandler, Counters = #server_counter{discardNoHandler = Value}) ->
+    emit_server_counter(inc_counter, discardNoHandler, Counters),
     Counters#server_counter{discardNoHandler = Value + 1};
 inc_counter(Counter, Nas = #nas_prop{}) ->
+    emit_nas_counter(inc_counter, Counter, Nas),
     gen_server:cast(?MODULE, {inc_counter, Counter, Nas});
-inc_counter(Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp, ServerPort}}) ->
+inc_counter(Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp, ServerPort}} = Key) ->
     Events = [eradius, inc_counter, Counter],
     Measurements = #{},
     Metadata = #{
@@ -63,11 +66,12 @@ inc_counter(Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp,
                  server_port => ServerPort
                 },
     telemetry:execute(Events, Measurements, Metadata),
-    gen_server:cast(?MODULE, {inc_counter, Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp, ServerPort}}}).
+    gen_server:cast(?MODULE, {inc_counter, Counter, Key}).
 
 dec_counter(Counter, Nas = #nas_prop{}) ->
+    emit_nas_counter(dec_counter, Counter, Nas),
     gen_server:cast(?MODULE, {dec_counter, Counter, Nas});
-dec_counter(Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp, ServerPort}}) ->
+dec_counter(Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp, ServerPort}} = Key) ->
     Events = [eradius, dec_counter, Counter],
     Measurements = #{},
     Metadata = #{
@@ -79,7 +83,7 @@ dec_counter(Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp,
                  server_port => ServerPort
                 },
     telemetry:execute(Events, Measurements, Metadata),
-    gen_server:cast(?MODULE, {dec_counter, Counter, {{ClientName, ClientIP, ClientPort}, {ServerName, ServerIp, ServerPort}}}).
+    gen_server:cast(?MODULE, {dec_counter, Counter, Key}).
 
 %% @doc reset all counters to zero
 reset() ->
@@ -105,68 +109,27 @@ aggregate({Servers, {ResetTS, Nass}}) ->
     NSum1 = [Value || {_Key, Value} <- orddict:to_list(NSums)],
     {Servers, {ResetTS, NSum1}}.
 
-%% @doc Set Value for the given prometheus boolean metric by the given Name with
-%% the given values
+%% @doc Emit a boolean gauge metric via telemetry only.
+%% Prometheus scrapes (if any) subscribe via eradius_prometheus_telemetry or PromEx.
 set_boolean_metric(Name, Labels, Value) ->
-    Events = [eradius, boolean, Name],
-    Measurements = #{value => Value},
-    Metadata = #{labels => Labels},
-    telemetry:execute(Events, Measurements, Metadata),
-    case code:is_loaded(prometheus) of
-        {file, _} ->
-            try
-                prometheus_boolean:set(Name, Labels, Value)
-            catch _:_ ->
-                prometheus_boolean:declare([{name, server_status}, {labels, [server_ip, server_port]},
-                                            {help, "Status of an upstream RADIUS Server"}]),
-                prometheus_boolean:set(Name, Labels, Value)
-            end;
-        _ ->
-            ok
-    end.
+    telemetry:execute([eradius, boolean, Name], #{value => Value}, #{labels => Labels}),
+    ok.
 
-%% @doc Update the given histogram metric value
-%% NOTE: We use prometheus_histogram collector here instead of eradius_counter ets table because
-%% it is much easy to use histograms in this way. As we don't need to manage buckets and do
-%% the other histogram things in eradius, but prometheus.erl will do it for us
-observe(Name, {{ClientName, ClientIP, _}, {ServerName, ServerIP, ServerPort}} = MetricsInfo, Value, Help) ->
-    Events = [eradius, observe, Name],
-    Measurements = #{value => Value},
-    Metadata = #{server_name => ServerName, server_ip => ServerIP, server_port => ServerPort, client_name => ClientName, client_ip => ClientIP},
-    telemetry:execute(Events, Measurements, Metadata),
-    case code:is_loaded(prometheus) of
-        {file, _} ->
-            try
-                prometheus_histogram:observe(Name, [ServerIP, ServerPort, ServerName, ClientName, ClientIP], Value)
-            catch _:_ ->
-                    Buckets = application:get_env(eradius, histogram_buckets, [10, 30, 50, 75, 100, 1000, 2000]),
-                    prometheus_histogram:declare([{name, Name}, {labels, [server_ip, server_port, server_name, client_name, client_ip]},
-                                                  {duration_unit, milliseconds},
-                                                  {buckets, Buckets}, {help, Help}]),
-                    observe(Name, MetricsInfo, Value, Help)
-            end;
-        _ ->
-            ok
-    end.
-observe(Name, #nas_prop{server_ip = ServerIP, server_port = ServerPort, nas_ip = NasIP, nas_id = NasId} = Nas, Value, ServerName, Help) ->
-    Events = [eradius, observe, Name],
-    Measurements = #{value => Value},
-    Metadata = #{server_name => ServerName, server_ip => ServerIP, server_port => ServerPort, nas_ip => NasIP, nas_id => NasId},
-    telemetry:execute(Events, Measurements, Metadata),
-    case code:is_loaded(prometheus) of
-        {file, _} ->
-            try
-                prometheus_histogram:observe(Name, [inet:ntoa(ServerIP), ServerPort, ServerName, inet:ntoa(NasIP), NasId], Value)
-            catch _:_ ->
-                    Buckets = application:get_env(eradius, histogram_buckets, [10, 30, 50, 75, 100, 1000, 2000]),
-                    prometheus_histogram:declare([{name, Name}, {labels, [server_ip, server_port, server_name, nas_ip, nas_id]},
-                                                  {duration_unit, milliseconds},
-                                                  {buckets, Buckets}, {help, Help}]),
-                    observe(Name, Nas, Value, ServerName, Help)
-            end;
-        _ ->
-            ok
-    end.
+%% @doc Emit a histogram observation via telemetry only.
+%% Optional sinks (eradius_prometheus_telemetry, PromEx) attach to these events.
+%% Help is kept for API compatibility and included in event metadata.
+observe(Name, {{ClientName, ClientIP, _}, {ServerName, ServerIP, ServerPort}}, Value, Help) ->
+    Metadata = #{server_name => ServerName, server_ip => ServerIP, server_port => ServerPort,
+                 client_name => ClientName, client_ip => ClientIP, help => Help,
+                 label_set => client},
+    telemetry:execute([eradius, observe, Name], #{value => Value}, Metadata),
+    ok.
+observe(Name, #nas_prop{server_ip = ServerIP, server_port = ServerPort, nas_ip = NasIP, nas_id = NasId},
+        Value, ServerName, Help) ->
+    Metadata = #{server_name => ServerName, server_ip => ServerIP, server_port => ServerPort,
+                 nas_ip => NasIP, nas_id => NasId, help => Help, label_set => nas},
+    telemetry:execute([eradius, observe, Name], #{value => Value}, Metadata),
+    ok.
 
 %% helper to be called from the aggregator to fetch this nodes values
 %% @private
@@ -242,6 +205,41 @@ terminate(_Reason, _State)           -> ok.
 %% ------------------------------------------------------------------------------------------
 %% -- helper functions
 %% @private
+
+%% Telemetry event names (stable contract):
+%%   [eradius, inc_counter, Counter]  — counter increment (NAS, client, or server)
+%%   [eradius, dec_counter, Counter]  — counter decrement
+%%   [eradius, observe, Name]         — histogram observation (measurements: value)
+%%   [eradius, boolean, Name]         — boolean gauge (measurements: value)
+%% Core never dual-writes to prometheus; optional sinks attach handlers.
+
+emit_nas_counter(Action, Counter, #nas_prop{server_ip = ServerIP, server_port = ServerPort,
+                                            nas_ip = NasIP, nas_id = NasId,
+                                            metrics_info = MetricsInfo}) ->
+    ServerName = case MetricsInfo of
+                     {{SN, _, _}, _} -> SN;
+                     _ -> undefined
+                 end,
+    Metadata = #{
+                 server_name => ServerName,
+                 server_ip => ServerIP,
+                 server_port => ServerPort,
+                 nas_ip => NasIP,
+                 nas_id => NasId
+                },
+    telemetry:execute([eradius, Action, Counter], #{}, Metadata).
+
+emit_server_counter(Action, Counter, #server_counter{key = Key, server_name = ServerName}) ->
+    {ServerIP, ServerPort} = case Key of
+                                 {IP, Port} -> {IP, Port};
+                                 _ -> {undefined, undefined}
+                             end,
+    Metadata = #{
+                 server_name => ServerName,
+                 server_ip => ServerIP,
+                 server_port => ServerPort
+                },
+    telemetry:execute([eradius, Action, Counter], #{}, Metadata).
 
 read_stats(State) ->
     {State#state.reset, ets:tab2list(?MODULE)}.

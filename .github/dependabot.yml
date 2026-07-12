@@ -1,0 +1,40 @@
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      github-actions-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
+
+  - package-ecosystem: mix
+    directory: /prom_ex_eradius
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      elixir-deps:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      elixir-deps-major:
+        patterns:
+          - "*"
+        update-types:
+          - major

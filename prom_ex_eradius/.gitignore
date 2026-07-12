@@ -1,0 +1,8 @@
+/_build/
+/deps/
+/doc/
+/.fetch
+/mix.lock.bak
+/.mix_home/
+*.ez
+prom_ex_eradius-*.tar

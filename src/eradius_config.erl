@@ -124,14 +124,19 @@ validate_nas(_NasId, _IP, Secret, _Name, _) ->
 % -- direct validation function
 
 validate_ip(IP) when is_list(IP) ->
-    ok_error_helper(inet_parse:address(IP), {"bad IP address: ~p", [IP]});
+    ok_error_helper(inet:parse_address(IP), {"bad IP address: ~p", [IP]});
 validate_ip(IP) when ?ip4_address(IP) ->
     IP;
 validate_ip(X) ->
     ?invalid("bad IP address: ~p", [X]).
 
 validate_ports(Ports) -> map_helper(fun validate_port/1, Ports).
-validate_port(Port) when is_list(Port) -> validate_port(catch list_to_integer(Port));
+validate_port(Port) when is_list(Port) ->
+    try list_to_integer(Port) of
+        N -> validate_port(N)
+    catch
+        error:badarg -> ?invalid("bad port number: ~p", [Port])
+    end;
 validate_port(Port) when ?pos_int(Port) -> Port;
 validate_port(Port) when is_integer(Port) -> ?invalid("port number out of range: ~p", [Port]);
 validate_port(Port) -> ?invalid("bad port number: ~p", [Port]).
@@ -191,7 +196,7 @@ build_nas_behavior_list({Module, Nas, Args}, ListOfNases) ->
 
 build_nasname(Nas, IP) ->
     NasBinary = tob(Nas),
-    IPString = inet_parse:ntoa(IP),
+    IPString = inet:ntoa(IP),
     <<NasBinary/binary, "_", (list_to_binary(IPString))/binary>>.
 
 tob(Integer) when is_integer(Integer) -> tob(integer_to_list(Integer));
@@ -240,16 +245,17 @@ validate_server_config([{Server, NasList} | ConfigRest]) ->
 validate_server_config([InvalidTerm | _ConfigRest]) -> ?invalid("bad term in server list: ~p", [InvalidTerm]).
 
 validate_server({IP, Port}) when is_list(Port) ->
-    case (catch list_to_integer(Port)) of
-        {'EXIT', _} ->
-            {invalid, io_lib:format("bad port number: ~p", [Port])};
+    try list_to_integer(Port) of
         Num when ?pos_int(Num) ->
             validate_server({IP, Num});
         Num ->
             {invalid, io_lib:format("port number out of range: ~p", [Num])}
+    catch
+        error:badarg ->
+            {invalid, io_lib:format("bad port number: ~p", [Port])}
     end;
 validate_server({IP, Port}) when is_list(IP), ?pos_int(Port) ->
-    case inet_parse:ipv4_address(IP) of
+    case inet:parse_ipv4_address(IP) of
         {ok, Address} ->
             {Address, Port};
         {error, einval} ->
@@ -280,7 +286,7 @@ validate_server(X) ->
 validate_nas_list([]) ->
     [];
 validate_nas_list([{NasAddress, Secret, HandlerNodes, Module, Args} | NasListRest]) when is_list(NasAddress) ->
-    case inet_parse:ipv4_address(NasAddress) of
+    case inet:parse_ipv4_address(NasAddress) of
         {ok, ValidAddress} ->
             validate_nas_list([{ValidAddress, Secret, HandlerNodes, Module, Args} | NasListRest]);
         {error, einval} ->
@@ -368,8 +374,15 @@ get_app_env(App, Env) ->
     case application:get_env(App, Env) of
         {ok, Value} ->
             Value;
-        _ ->
-            ?invalid("config parameter: ~p is undefined for application ~p", [Env, App])
+        undefined ->
+            case Env of
+                servers -> [];
+                session_nodes -> local;
+                tables -> [dictionary];
+                servers_pool -> [];
+                _ ->
+                    ?invalid("config parameter: ~p is undefined for application ~p", [Env, App])
+            end
     end.
 
 map_helper(Fun, Values) ->
@@ -393,7 +406,11 @@ ok_error_helper({ok, Value}, _ErrorMessage) -> Value;
 ok_error_helper(Value, _ErrorMessage) -> Value.
 
 generate_ip_list(IP, Mask) when is_list(Mask) ->
-    generate_ip_list(IP, catch list_to_integer(Mask));
+    try list_to_integer(Mask) of
+        N -> generate_ip_list(IP, N)
+    catch
+        error:badarg -> ?invalid("invalid mask ~p", [Mask])
+    end;
 generate_ip_list({A, B, C, D}, Mask) when Mask >=0, Mask =< 32 ->
     <<Address:32/integer>> = <<A, B, C, D>>,
     Wildcard = 16#ffffffff bsr Mask,

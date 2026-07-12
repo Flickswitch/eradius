@@ -50,25 +50,26 @@ init_per_suite(Config) ->
                                     {eradius_test_handler:localhost(tuple), 1812, ?SECRET}]}]
                      },
                      {good, [
-                             { {"good", [] }, [{"127.0.0.2", ?SECRET, [{nas_id, <<"good_nas">>}]}] }
+                             { {"good", [] }, [{"127.0.0.1", ?SECRET, [{nas_id, <<"good_nas">>}]}] }
                             ]},
                      {bad, [
-                              { {"bad", [] }, [{"127.0.0.2", ?SECRET, [{nas_id, <<"bad_nas">>}]}] }
+                              { {"bad", [] }, [{"127.0.0.1", ?SECRET, [{nas_id, <<"bad_nas">>}]}] }
                              ]},
                      {error, [
-                              { {"error", [] }, [{"127.0.0.2", ?SECRET, [{nas_id, <<"error_nas">>}]}] }
+                              { {"error", [] }, [{"127.0.0.1", ?SECRET, [{nas_id, <<"error_nas">>}]}] }
                              ]},
                      {tables, [dictionary]},
-                     {client_ip, {127,0,0,2}},
+                     %% Use 127.0.0.1 for client+NAS: macOS only routes 127.0.0.1
+                     %% on loopback by default (Linux allows the full 127/8).
+                     {client_ip, {127,0,0,1}},
                      {client_ports, 20},
                      {counter_aggregator, false},
                      {server_status_metrics_enabled, true}
                     ],
     [application:set_env(eradius, Key, Value) || {Key, Value} <- EradiusConfig],
     application:set_env(prometheus, collectors, [eradius_prometheus_collector]),
-    % prometheus is not included directly to eradius but prometheus_eradius_collector
-    % should include it
-    application:ensure_all_started(prometheus),
+    %% Starts prometheus + attaches telemetry→prometheus sink for histograms/booleans
+    {ok, _} = application:ensure_all_started(eradius_prometheus_collector),
     {ok, _} = application:ensure_all_started(eradius),
     spawn(fun() ->
                   eradius:modules_ready([?MODULE]),
@@ -78,6 +79,7 @@ init_per_suite(Config) ->
 
 end_per_suite(_Config) ->
     application:stop(eradius),
+    application:stop(eradius_prometheus_collector),
     application:stop(prometheus),
     ok.
 

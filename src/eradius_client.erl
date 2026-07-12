@@ -13,7 +13,7 @@
 -module(eradius_client).
 -export([start_link/0, send_request/2, send_request/3, send_remote_request/3, send_remote_request/4]).
 %% internal
--export([reconfigure/0, send_remote_request_loop/8, find_suitable_peer/1,
+-export([reconfigure/0, send_remote_request_loop/8,
          restore_upstream_server/1, store_radius_server_from_pool/3,
          init_server_status_metrics/0]).
 
@@ -92,21 +92,15 @@ send_request({IP, Port, Secret}, Request, Options) when ?GOOD_CMD(Request) andal
         [] ->
             SendReqFn();
         UpstreamServers ->
-            case find_suitable_peer([{IP, Port, Secret} | UpstreamServers]) of
+            case find_suitable_peer([{IP, Port, Secret, Options} | UpstreamServers]) of
                 [] ->
                     no_active_servers;
-                {{IP, Port, Secret}, _NewPool} ->
+                {{IP, Port, Secret, Options}, _NewPool} ->
                     SendReqFn();
-                {NewPeer, []} ->
-                    % Special case, we don't have servers in the pool anymore, but we need
-                    % to preserve `failover` option to mark current server as inactive if
-                    % it will fail
-                    NewOptions = lists:keyreplace(failover, 1, Options, {failover, undefined}),
-                    send_request(NewPeer, Request, NewOptions);
-                {NewPeer, NewPool} ->
+                {{NewPeerAddr, NewPeerPort, NewPeerSecret, PeerOpts}, NewPool} ->
                     % current server is not in list of active servers, so use another one
-                    NewOptions = lists:keyreplace(failover, 1, Options, {failover, NewPool}),
-                    send_request(NewPeer, Request, NewOptions)
+                    send_request({NewPeerAddr, NewPeerPort, NewPeerSecret}, Request,
+                                 [{failover, NewPool} | PeerOpts])
             end
     end;
 send_request({_IP, _Port, _Secret}, _Request, _Options) ->
@@ -165,19 +159,23 @@ proceed_response(Request, {ok, Response, Secret, Authenticator}, _Peer = {_Serve
     case eradius_lib:decode_request(Response, Secret, Authenticator) of
         {bad_pdu, "Message-Authenticator Attribute is invalid" = Reason} ->
             update_client_response(bad_authenticator, MetricsInfo, Request),
-            ?LOG(error, "~s INF: Noreply for request ~p. Could not decode the request, reason: ~s", [printable_peer(ServerIP, Port), Request, Reason]),
+            ?LOG(error, "~s INF: Noreply for request ~p. Could not decode the response, reason: ~s",
+                 [printable_peer(ServerIP, Port), Request, Reason], #{domain => [eradius]}),
             noreply;
         {bad_pdu, "Authenticator Attribute is invalid" = Reason} ->
             update_client_response(bad_authenticator, MetricsInfo, Request),
-            ?LOG(error, "~s INF: Noreply for request ~p. Could not decode the request, reason: ~s", [printable_peer(ServerIP, Port), Request, Reason]),
+            ?LOG(error, "~s INF: Noreply for request ~p. Could not decode the response, reason: ~s",
+                 [printable_peer(ServerIP, Port), Request, Reason], #{domain => [eradius]}),
             noreply;
         {bad_pdu, "unknown request type" = Reason} ->
             update_client_response(unknown_req_type, MetricsInfo, Request),
-            ?LOG(error, "~s INF: Noreply for request ~p. Could not decode the request, reason: ~s", [printable_peer(ServerIP, Port), Request, Reason]),
+            ?LOG(error, "~s INF: Noreply for request ~p. Could not decode the response, reason: ~s",
+                 [printable_peer(ServerIP, Port), Request, Reason], #{domain => [eradius]}),
             noreply;
         {bad_pdu, Reason} ->
             update_client_response(dropped, MetricsInfo, Request),
-            ?LOG(error, "~s INF: Noreply for request ~p. Could not decode the request, reason: ~s", [printable_peer(ServerIP, Port), Request, Reason]),
+            ?LOG(error, "~s INF: Noreply for request ~p. Could not decode the response, reason: ~s",
+                 [printable_peer(ServerIP, Port), Request, Reason], #{domain => [eradius]}),
             maybe_failover(Request, noreply, {ServerIP, Port}, Options);
         Decoded ->
             update_server_status_metric(ServerIP, Port, true, Options),
@@ -223,10 +221,9 @@ handle_failed_request(Request, {ServerIP, Port} = _FailedServer, UpstreamServers
     case find_suitable_peer(UpstreamServers) of
         [] ->
             Response;
-        {NewPeer, NewPool} ->
-            % leave only active upstream servers
-            NewOptions = lists:keyreplace(failover, 1, Options, {failover, NewPool}),
-            send_request(NewPeer, Request, NewOptions)
+        {{NewPeerAddr, NewPeerPort, NewPeerSecret, PeerOpts}, NewPool} ->
+            send_request({NewPeerAddr, NewPeerPort, NewPeerSecret}, Request,
+                         [{failover, NewPool} | PeerOpts])
     end.
 
 % @private
@@ -314,7 +311,9 @@ update_client_response(_, _, _)                           -> ok.
 
 %% @private
 reconfigure() ->
-    catch gen_server:call(?SERVER, reconfigure, ?RECONFIGURE_TIMEOUT).
+    try gen_server:call(?SERVER, reconfigure, ?RECONFIGURE_TIMEOUT)
+    catch _:_ -> ok
+    end.
 
 %% ------------------------------------------------------------------------------------------
 %% -- socket process manager
@@ -329,7 +328,11 @@ reconfigure() ->
 
 %% @private
 init([]) ->
-    {ok, Sup} = eradius_client_sup:start(),
+    logger:set_process_metadata(#{domain => [eradius]}),
+    Sup = case eradius_client_sup:start() of
+              {ok, Pid} -> Pid;
+              {error, {already_started, Pid}} -> Pid
+          end,
     case configure(#state{socket_ip = null, sup = Sup}) of
         {error, Error}  -> {stop, Error};
         Else            -> Else
@@ -392,13 +395,14 @@ configure(State) ->
             ets:delete(?MODULE),
             prepare_pools()
     end,
-    {ok, ClientPortCount} = application:get_env(eradius, client_ports),
-    {ok, ClientIP} = application:get_env(eradius, client_ip),
+    ClientPortCount = application:get_env(eradius, client_ports, 100),
+    ClientIP = application:get_env(eradius, client_ip, undefined),
     case parse_ip(ClientIP) of
         {ok, Address} ->
             configure_address(State, ClientPortCount, Address);
         {error, _} ->
-            ?LOG(error, "Invalid RADIUS client IP (parsing failed): ~p", [ClientIP]),
+            ?LOG(error, "Invalid RADIUS client IP (parsing failed): ~p", [ClientIP],
+                 #{domain => [eradius]}),
             {error, {bad_client_ip, ClientIP}}
     end.
 
@@ -444,10 +448,17 @@ store_upstream_servers(Server) ->
 store_radius_server_from_pool(Addr, Port, Retries) when is_tuple(Addr) and is_integer(Port) and is_integer(Retries) ->
     ets:insert(?MODULE, {{Addr, Port}, Retries, Retries});
 store_radius_server_from_pool(Addr, Port, Retries) when is_list(Addr) and is_integer(Port) and is_integer(Retries) ->
-    IP = get_ip(Addr),
-    ets:insert(?MODULE, {{IP, Port}, Retries, Retries});
+    try
+        IP = get_ip(Addr),
+        ets:insert(?MODULE, {{IP, Port}, Retries, Retries})
+    catch
+        error:badarg ->
+            ?LOG(error, "Can't resolve hostname - ~p", [Addr], #{domain => [eradius]}),
+            error(badarg)
+    end;
 store_radius_server_from_pool(Addr, Port, Retries) ->
-    ?LOG(error, "bad RADIUS upstream server specified in RADIUS servers pool configuration ~p", [{Addr, Port, Retries}]),
+    ?LOG(error, "bad RADIUS upstream server specified in RADIUS servers pool configuration ~p",
+         [{Addr, Port, Retries}], #{domain => [eradius]}),
     error(badarg).
 
 configure_address(State = #state{socket_ip = OAdd, sockets = Sockts}, NPorts, NAdd) ->
@@ -535,7 +546,7 @@ update_socket_process(PortIdx, Sockets, Pid) ->
 parse_ip(undefined) ->
     {ok, undefined};
 parse_ip(Address) when is_list(Address) ->
-    inet_parse:address(Address);
+    inet:parse_address(Address);
 parse_ip(T = {_, _, _, _}) ->
     {ok, T};
 parse_ip(T = {_, _, _, _, _, _}) ->
@@ -546,9 +557,8 @@ init_server_status_metrics() ->
         false ->
             ok;
         true ->
-            % That will be called at eradius startup and we must be sure that prometheus
-            % application already started if server status metrics supposed to be used
-            application:ensure_all_started(prometheus),
+            %% Emits telemetry only; optional prometheus sink attaches separately
+            %% (eradius_prometheus_collector / PromEx).
             ets:foldl(fun ({{Addr, Port}, _, _}, _Acc) ->
                 eradius_counter:set_boolean_metric(server_status, [Addr, Port], false)
             end, [], ?MODULE)
@@ -600,12 +610,6 @@ update_server_status_metric(IP, Port, true, Options) ->
     % set current service as active
     eradius_counter:set_boolean_metric(server_status, [IP, Port], true).
 
-%% check if we can use persistent_term for config
-%% persistent term was added in OTP 21.2 but we can't
-%% check minor versions with macros so we're stuck waiting
-%% for OTP 22
--ifdef(HAVE_PERSISTENT_TERM).
-
 client_request_counter_account_match_spec_compile() ->
     case persistent_term:get({?MODULE, ?FUNCTION_NAME}, undefined) of
         undefined ->
@@ -638,41 +642,26 @@ client_response_counter_account_match_spec_compile() ->
             MatchSpecCompile
     end.
 
--else.
-
-client_request_counter_account_match_spec_compile() ->
-    ets:match_spec_compile(ets:fun2ms(fun
-        ({?RStatus_Type, ?RStatus_Type_Start})  -> accountRequestsStart;
-        ({?RStatus_Type, ?RStatus_Type_Stop})   -> accountRequestsStop;
-        ({?RStatus_Type, ?RStatus_Type_Update}) -> accountRequestsUpdate;
-        ({#attribute{id = ?RStatus_Type}, ?RStatus_Type_Start})  -> accountRequestsStart;
-        ({#attribute{id = ?RStatus_Type}, ?RStatus_Type_Stop})   -> accountRequestsStop;
-        ({#attribute{id = ?RStatus_Type}, ?RStatus_Type_Update}) -> accountRequestsUpdate end)).
-
-client_response_counter_account_match_spec_compile() ->
-    ets:match_spec_compile(ets:fun2ms(fun
-        ({?RStatus_Type, ?RStatus_Type_Start})  -> accountResponsesStart;
-        ({?RStatus_Type, ?RStatus_Type_Stop})   -> accountResponsesStop;
-        ({?RStatus_Type, ?RStatus_Type_Update}) -> accountResponsesUpdate;
-        ({#attribute{id = ?RStatus_Type}, ?RStatus_Type_Start})  -> accountResponsesStart;
-        ({#attribute{id = ?RStatus_Type}, ?RStatus_Type_Stop})   -> accountResponsesStop;
-        ({#attribute{id = ?RStatus_Type}, ?RStatus_Type_Update}) -> accountResponsesUpdate end)).
-
--endif.
-
-find_suitable_peer(undefined) ->
-    [];
 find_suitable_peer([]) ->
     [];
-find_suitable_peer([{IP, Port, Secret} | Pool]) ->
+find_suitable_peer([{Host, Port, Secret, Opts} | Pool]) when is_list(Host) ->
+    try
+        IP = get_ip(Host),
+        find_suitable_peer([{IP, Port, Secret, Opts} | Pool])
+    catch
+        _:_ ->
+            ?LOG(error, "Can't resolve hostname - ~p", [Host], #{domain => [eradius]}),
+            find_suitable_peer(Pool)
+    end;
+find_suitable_peer([{IP, Port, Secret, Opts} | Pool]) ->
     case ets:lookup(?MODULE, {IP, Port}) of
         [] ->
             find_suitable_peer(Pool);
         [{{IP, Port}, _Retries, _InitialRetries}] ->
-            {{IP, Port, Secret}, Pool}
+            {{IP, Port, Secret, Opts}, Pool}
     end;
-find_suitable_peer([{IP, Port, Secret, _Opts} | Pool]) ->
-    find_suitable_peer([{IP, Port, Secret} | Pool]).
+find_suitable_peer([{IP, Port, Secret} | Pool]) ->
+    find_suitable_peer([{IP, Port, Secret, []} | Pool]).
 
 get_ip(Host) ->
     case inet:gethostbyname(Host) of

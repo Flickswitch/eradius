@@ -12,20 +12,47 @@ on:
 jobs:
   test:
     name: CI
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        otp: [22.3.4.16, 23.0.4, 23.1.5.0, 23.2.5.0, 24.0.3]
+        otp: ["29"]
     container:
       image: erlang:${{ matrix.otp }}-alpine
+    env:
+      # Set early so compile-time escripts and tests see legacy crypto (MD4/DES).
+      OPENSSL_CONF: ${{ github.workspace }}/priv/openssl-legacy.cnf
     steps:
+    - name: Checkout
+      uses: actions/checkout@v4
     - name: Prepare
       run: |
+           set -euo pipefail
            apk update
            apk --no-cache upgrade
-           apk --no-cache add git
-    - name: Checkout
-      uses: actions/checkout@v2
+           apk --no-cache add git openssl
+           if [ -d /usr/lib/ossl-modules ]; then
+             echo "OPENSSL_MODULES=/usr/lib/ossl-modules" >> "$GITHUB_ENV"
+             export OPENSSL_MODULES=/usr/lib/ossl-modules
+           elif [ -d /usr/lib64/ossl-modules ]; then
+             echo "OPENSSL_MODULES=/usr/lib64/ossl-modules" >> "$GITHUB_ENV"
+             export OPENSSL_MODULES=/usr/lib64/ossl-modules
+           else
+             echo "::error::OpenSSL ossl-modules directory not found (need legacy provider for MS-CHAP MD4/DES)"
+             exit 1
+           fi
+           if [ ! -f "$OPENSSL_CONF" ]; then
+             echo "::error::OPENSSL_CONF missing at $OPENSSL_CONF"
+             exit 1
+           fi
+           # Fail clearly if MD4 is unavailable (MS-CHAP / MPPE tests need it).
+           erl -noshell -eval '
+             case lists:member(md4, crypto:supports(hashs)) of
+               true -> io:format("crypto: md4 OK~n"), halt(0);
+               false ->
+                 io:format(standard_error, "crypto: md4 NOT available — OpenSSL legacy provider not loaded~n", []),
+                 halt(1)
+             end.
+           '
     - name: Build
       run: rebar3 compile
     - name: Run tests
@@ -39,34 +66,16 @@ jobs:
       run: DEBUG=1 rebar3 as test coveralls send || /bin/true
     - name: Archive Test Output
       if: ${{ always() }}
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: test-output-${{ matrix.otp }}
         path: |
           _build/test/logs/
           !_build/test/logs/last
 
-  slack:
-    needs: test
-    runs-on: ubuntu-20.04
-    if: always()
-    steps:
-    - name: Slack notification
-      uses: 8398a7/action-slack@v3
-      with:
-        author_name: "GitHub Actions"
-        username: ${{ github.event.repository.name }}
-        icon_emoji: ':octocat:'
-        fields: repo, message, ref, commit, author, action, eventName, workflow, job, took
-        status: ${{ needs.test.result }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
-        MATRIX_CONTEXT: ${{ toJson(matrix) }}
-
   finish:
     needs: test
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     if: always()
     steps:
     - name: Coveralls Finished

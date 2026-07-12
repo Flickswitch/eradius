@@ -203,6 +203,8 @@ config_with_ranges(_Config) ->
 log_test(_Config) ->
     LogFile0 = "./radius.log",
     LogFile1 = "./radius1.log",
+    AuditFile = "./radius_audit_test.log",
+    file:delete(AuditFile),
     LogOn0 = [{logging, true}, {logfile, LogFile0}],
     LogOn1 = [{logging, true}, {logfile, LogFile1}],
     LogOff = [{logging, false}],
@@ -231,6 +233,17 @@ log_test(_Config) ->
     set_env(LogOn0),
     eradius:config_change([], LogOn1, []),
     ?match(true, logger_disabled /= gen_server:call(eradius_log, get_state)),
+
+    % shipped write_request path writes a non-empty audit line
+    set_env([{logging, true}, {logfile, AuditFile}]),
+    ok = eradius_log:reconfigure(),
+    Req = #radius_request{cmd = request, reqid = 7, attrs = [], secret = <<"s">>},
+    ok = eradius_log:write_request({{127, 0, 0, 1}, 1812, 7}, Req),
+    timer:sleep(100),
+    {ok, AuditBin} = file:read_file(AuditFile),
+    ?match(true, byte_size(AuditBin) > 0),
+    ?match(true, binary:match(AuditBin, <<"Access-Request">>) =/= nomatch),
+    file:delete(AuditFile),
 
     % check default value for logging
     application:unset_env(eradius, logging),
