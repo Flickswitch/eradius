@@ -1,0 +1,974 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Prometheus datasource scraping eradius (collector or PromEx)",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
+    { "type": "panel", "id": "table", "name": "Table", "version": "" },
+    { "type": "panel", "id": "gauge", "name": "Gauge", "version": "" },
+    { "type": "panel", "id": "bargauge", "name": "Bar gauge", "version": "" }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Operational overview for eradius RADIUS servers and clients. Works with eradius_prometheus_collector scrape metrics (eradius_*). Filter by server/NAS via variables.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "doc",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": true,
+      "title": "METRICS.md",
+      "tooltip": "eradius metrics documentation",
+      "type": "link",
+      "url": "https://github.com/Flickswitch/eradius/blob/master/METRICS.md"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Overview",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Inbound RADIUS requests (all types) rate",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null }
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "sum(rate(eradius_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "req/s",
+          "refId": "A"
+        }
+      ],
+      "title": "Server request rate",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Access-Accept / Access-Request over the selected window (0–1)",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.7 },
+              { "color": "green", "value": 0.9 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "sum(rate(eradius_accept_responses_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) / clamp_min(sum(rate(eradius_access_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])), 1e-9)",
+          "legendFormat": "accept ratio",
+          "refId": "A"
+        }
+      ],
+      "title": "Auth accept ratio",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Reject + challenge as fraction of access requests",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.2 },
+              { "color": "red", "value": 0.5 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "expr": "(sum(rate(eradius_reject_responses_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) + sum(rate(eradius_access_challenge_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval]))) / clamp_min(sum(rate(eradius_access_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])), 1e-9)",
+          "legendFormat": "reject+challenge",
+          "refId": "A"
+        }
+      ],
+      "title": "Reject / challenge ratio",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "In-flight server handler work (pending gauge sum)",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 50 },
+              { "color": "red", "value": 200 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "expr": "sum(eradius_pending_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}) or vector(0)",
+          "legendFormat": "pending",
+          "refId": "A"
+        }
+      ],
+      "title": "Server pending",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Client-side timeouts (upstream unresponsive)",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.1 },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eradius_client_timeouts_total{server_name=~\"$server_name\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "timeouts/s",
+          "refId": "A"
+        }
+      ],
+      "title": "Client timeouts",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Protocol / security errors (malformed, bad auth, dropped, unknown type, invalid)",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.05 },
+              { "color": "red", "value": 0.5 }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eradius_malformed_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) + sum(rate(eradius_bad_authenticator_request_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) + sum(rate(eradius_packets_dropped_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) + sum(rate(eradius_unknown_type_request_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) + sum(rate(eradius_invalid_requests_total{server_name=~\"$server_name\"}[$__rate_interval]))",
+          "legendFormat": "errors/s",
+          "refId": "A"
+        }
+      ],
+      "title": "Server error rate",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 101,
+      "title": "Traffic & auth outcomes",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Request mix by RADIUS command family",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "stacking": { "mode": "normal", "group": "A" }
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "id": 10,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eradius_access_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) by (server_name)",
+          "legendFormat": "access {{server_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(eradius_accounting_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) by (server_name)",
+          "legendFormat": "acct {{server_name}}",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(eradius_coa_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) by (server_name)",
+          "legendFormat": "coa {{server_name}}",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(eradius_disconnect_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) by (server_name)",
+          "legendFormat": "disconnect {{server_name}}",
+          "refId": "D"
+        }
+      ],
+      "title": "Server requests by type",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Access-Accept / Reject / Challenge rates — core auth signal",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "unit": "ops"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": ".*accept.*" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": ".*reject.*" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": ".*challenge.*" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "id": 11,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eradius_accept_responses_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval]))",
+          "legendFormat": "accept",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(eradius_reject_responses_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval]))",
+          "legendFormat": "reject",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(eradius_access_challenge_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval]))",
+          "legendFormat": "challenge",
+          "refId": "C"
+        }
+      ],
+      "title": "Auth responses (accept / reject / challenge)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Accounting start/stop/update request rates",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never" },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 14 },
+      "id": 12,
+      "options": {
+        "legend": { "calcs": ["mean"], "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eradius_accounting_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\",acct_type=\"start\"}[$__rate_interval])) or sum(rate(eradius_accounting_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) * 0",
+          "legendFormat": "start",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(eradius_accounting_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\",acct_type=\"stop\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "stop",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(eradius_accounting_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\",acct_type=\"update\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "update",
+          "refId": "C"
+        }
+      ],
+      "title": "Accounting by type",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Duplicates and NAS retransmissions — often network or slow handlers",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 14 },
+      "id": 13,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eradius_duplicated_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval]))",
+          "legendFormat": "duplicates",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(eradius_retransmissions_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval]))",
+          "legendFormat": "retransmissions",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(eradius_pending_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"})",
+          "legendFormat": "pending (gauge)",
+          "refId": "C"
+        }
+      ],
+      "title": "Duplicates, retransmits, pending",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 },
+      "id": 102,
+      "title": "Errors & protocol health",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Server-side protocol and security failures",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 15, "lineWidth": 2, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "id": 20,
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eradius_malformed_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval]))",
+          "legendFormat": "malformed",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(eradius_bad_authenticator_request_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval]))",
+          "legendFormat": "bad authenticator",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(eradius_packets_dropped_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval]))",
+          "legendFormat": "dropped",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(eradius_unknown_type_request_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval]))",
+          "legendFormat": "unknown type",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(rate(eradius_invalid_requests_total{server_name=~\"$server_name\"}[$__rate_interval]))",
+          "legendFormat": "invalid (no NAS)",
+          "refId": "E"
+        }
+      ],
+      "title": "Server protocol errors",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Client / proxy path failures talking to upstream RADIUS",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 15, "lineWidth": 2, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "id": 21,
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eradius_client_timeouts_total{server_name=~\"$server_name\"}[$__rate_interval]))",
+          "legendFormat": "timeouts",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(eradius_client_retransmissions_total{server_name=~\"$server_name\"}[$__rate_interval]))",
+          "legendFormat": "retransmissions",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(eradius_client_packets_dropped_total{server_name=~\"$server_name\"}[$__rate_interval]))",
+          "legendFormat": "dropped",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(eradius_client_bad_authenticator_request_total{server_name=~\"$server_name\"}[$__rate_interval]))",
+          "legendFormat": "bad authenticator",
+          "refId": "D"
+        }
+      ],
+      "title": "Client / upstream errors",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 30 },
+      "id": 103,
+      "title": "Latency",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Handler latency histogram (server). Requires eradius_prometheus_telemetry or histogram scrape of eradius_request_duration_milliseconds_*",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never" },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 31 },
+      "id": 30,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(eradius_request_duration_milliseconds_bucket{server_name=~\"$server_name\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(eradius_request_duration_milliseconds_bucket{server_name=~\"$server_name\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(eradius_request_duration_milliseconds_bucket{server_name=~\"$server_name\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "title": "Server request latency (p50 / p95 / p99)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Client RTT to upstream RADIUS (includes network + remote processing)",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never" },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 31 },
+      "id": 31,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(eradius_client_request_duration_milliseconds_bucket{server_name=~\"$server_name\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(eradius_client_request_duration_milliseconds_bucket{server_name=~\"$server_name\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(eradius_client_request_duration_milliseconds_bucket{server_name=~\"$server_name\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "title": "Client request latency (p50 / p95 / p99)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Latency by request type (server access vs accounting vs CoA)",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 2, "showPoints": "never" },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 39 },
+      "id": 32,
+      "options": {
+        "legend": { "calcs": ["mean"], "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(eradius_access_request_duration_milliseconds_bucket{server_name=~\"$server_name\"}[$__rate_interval])) by (le))",
+          "legendFormat": "access p95",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(eradius_accounting_request_duration_milliseconds_bucket{server_name=~\"$server_name\"}[$__rate_interval])) by (le))",
+          "legendFormat": "accounting p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(eradius_coa_request_duration_milliseconds_bucket{server_name=~\"$server_name\"}[$__rate_interval])) by (le))",
+          "legendFormat": "coa p95",
+          "refId": "C"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(eradius_disconnect_request_duration_milliseconds_bucket{server_name=~\"$server_name\"}[$__rate_interval])) by (le))",
+          "legendFormat": "disconnect p95",
+          "refId": "D"
+        }
+      ],
+      "title": "Server latency p95 by request type",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 46 },
+      "id": 104,
+      "title": "Per-NAS & upstream",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Top NASes by request rate — find hot peers",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null }
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 47 },
+      "id": 40,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "topk(15, sum(rate(eradius_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) by (nas_id, nas_ip, server_name))",
+          "format": "time_series",
+          "legendFormat": "{{nas_id}} {{nas_ip}} ({{server_name}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Top NAS by request rate",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Upstream server_status boolean (1=active). Requires server_status_metrics_enabled + telemetry sink.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "down" } }, "type": "value" },
+            { "options": { "1": { "color": "green", "text": "up" } }, "type": "value" }
+          ],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 47 },
+      "id": 41,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "server_status",
+          "legendFormat": "{{labels}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Upstream server status",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Per-NAS accept ratio and error signals for drill-down",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "filterable": true },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Accept ratio" },
+            "properties": [
+              { "id": "unit", "value": "percentunit" },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "orange", "value": 0.7 },
+                    { "color": "green", "value": 0.9 }
+                  ]
+                }
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 55 },
+      "id": 42,
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "Requests/s" }]
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eradius_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) by (server_name, nas_id, nas_ip)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "req"
+        },
+        {
+          "expr": "sum(rate(eradius_accept_responses_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) by (server_name, nas_id, nas_ip) / clamp_min(sum(rate(eradius_access_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) by (server_name, nas_id, nas_ip), 1e-9)",
+          "format": "table",
+          "instant": true,
+          "refId": "accept"
+        },
+        {
+          "expr": "sum(rate(eradius_reject_responses_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) by (server_name, nas_id, nas_ip)",
+          "format": "table",
+          "instant": true,
+          "refId": "reject"
+        },
+        {
+          "expr": "sum(rate(eradius_bad_authenticator_request_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}[$__rate_interval])) by (server_name, nas_id, nas_ip)",
+          "format": "table",
+          "instant": true,
+          "refId": "badauth"
+        },
+        {
+          "expr": "sum(eradius_pending_requests_total{server_name=~\"$server_name\",nas_id=~\"$nas_id\"}) by (server_name, nas_id, nas_ip)",
+          "format": "table",
+          "instant": true,
+          "refId": "pending"
+        }
+      ],
+      "title": "Per-NAS summary",
+      "transformations": [
+        {
+          "id": "seriesToColumns",
+          "options": { "byField": "nas_id" }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true
+            },
+            "renameByName": {
+              "Value #req": "Requests/s",
+              "Value #accept": "Accept ratio",
+              "Value #reject": "Rejects/s",
+              "Value #badauth": "Bad auth/s",
+              "Value #pending": "Pending",
+              "server_name": "Server",
+              "nas_id": "NAS id",
+              "nas_ip": "NAS IP"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 64 },
+      "id": 105,
+      "title": "Capacity",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Listener uptime and time since counter reset",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 1, "showPoints": "never" },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 65 },
+      "id": 50,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "expr": "eradius_uptime_milliseconds{server_name=~\"$server_name\"}",
+          "legendFormat": "uptime {{server_name}} {{server_ip}}:{{server_port}}",
+          "refId": "A"
+        },
+        {
+          "expr": "eradius_since_last_reset_milliseconds{server_name=~\"$server_name\"}",
+          "legendFormat": "since reset {{server_name}} {{server_ip}}:{{server_port}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Server uptime / since last stats reset",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["eradius", "radius", "aaa"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      },
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "definition": "label_values(eradius_requests_total, server_name)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Server",
+        "multi": true,
+        "name": "server_name",
+        "options": [],
+        "query": { "query": "label_values(eradius_requests_total, server_name)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "definition": "label_values(eradius_requests_total{server_name=~\"$server_name\"}, nas_id)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "NAS id",
+        "multi": true,
+        "name": "nas_id",
+        "options": [],
+        "query": { "query": "label_values(eradius_requests_total{server_name=~\"$server_name\"}, nas_id)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {
+    "refresh_intervals": ["10s", "30s", "1m", "5m"]
+  },
+  "timezone": "browser",
+  "title": "eradius / RADIUS overview",
+  "uid": "eradius-overview",
+  "version": 1,
+  "weekStart": ""
+}

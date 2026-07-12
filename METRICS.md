@@ -48,6 +48,13 @@ repository (`prom_ex_eradius/`). It implements `PromEx.Plugin` and maps the
 events above to counters / distributions / last-value gauges. See
 `prom_ex_eradius/README.md`.
 
+### Grafana
+
+A ready-made operational dashboard lives in
+[`grafana/eradius-overview.json`](grafana/eradius-overview.json). Import into
+Grafana (Prometheus datasource). See [`grafana/README.md`](grafana/README.md)
+for panels, variables, and alert sketches.
+
 ## Prometheus scrapable metrics
 
 For now, there are 2 groups of scrape metrics:

@@ -90,6 +90,7 @@ Optional sinks:
 
 * Elixir: [`prom_ex_eradius/`](prom_ex_eradius/) PromEx plugin
 * Erlang: start `eradius_prometheus_collector` (telemetry → prometheus + ETS scrape)
+* Grafana: import [`grafana/eradius-overview.json`](grafana/eradius-overview.json) — traffic, auth outcomes, errors, latency, per-NAS breakdown (see [`grafana/README.md`](grafana/README.md))
 
 Covered measurements include:
   * counter and handle time for requests
