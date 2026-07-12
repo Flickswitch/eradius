@@ -31,17 +31,29 @@ several authentication mechanisms and dynamic configuration
 
 # Erlang Version Support
 
-All minor version of the current major release and the highest minor version of the
-previous major release will be supported.
-At the moment this means OTP `21.3`, OTP `22.x`, OTP `23.x` and OTP `24.x` are supported. OTP versions before `21.0`
-do not work due the use of logger. When in doubt check the `otp_release` section in
-[main.yml](.github/workflows/main.yml) for tested versions.
+`eradius` requires **OTP 29** or newer (`minimum_otp_vsn` is `"29"`).
+When in doubt check the `otp` matrix in [main.yml](.github/workflows/main.yml) for tested versions.
 
 # Building eradius
 
 ```sh
 $ rebar3 compile
 ```
+
+## MS-CHAP / MPPE and OpenSSL 3 legacy algorithms
+
+MS-CHAPv1/v2 and MPPE require **MD4** and **DES**, which OpenSSL 3 ships in the
+optional *legacy* provider. OTP 29 crypto loads that provider when configured:
+
+```sh
+export OPENSSL_CONF=$PWD/priv/openssl-legacy.cnf
+# path to ossl-modules (homebrew example):
+export OPENSSL_MODULES=/opt/homebrew/opt/openssl@3/lib/ossl-modules
+rebar3 ct
+```
+
+Without the legacy provider, `crypto:hash(md4, …)` and `des_ecb` raise
+`notsup`. Core RADIUS encode/decode and non-MS-CHAP paths do not need it.
 
 # Using eradius
 
@@ -70,21 +82,39 @@ ok
 
 # Metrics
 
-Eradius exposes following metrics via exometer:
+`eradius` emits operational metrics via [telemetry](https://hex.pm/packages/telemetry)
+events under the `[eradius | …]` prefix. ETS counters remain available for pull/read
+aggregation. Core does **not** call Prometheus directly.
+
+Optional sinks:
+
+* Elixir: [`prom_ex_eradius/`](prom_ex_eradius/) PromEx plugin
+* Erlang: start `eradius_prometheus_collector` (telemetry → prometheus + ETS scrape)
+
+Covered measurements include:
   * counter and handle time for requests
-  * counter for responses (this includes acks, naks, accepts etc.)
+  * counter for responses (acks, naks, accepts, etc.)
+  * client, server, and NAS-scoped counters
+  * optional upstream `server_status` boolean gauges
 
-The measurements are available for client, server and also for the specific
-NAS callbacks. Further they are exposed in a 'total' fashion but also itemized
-by request/response type (e.g. access request, accounting response etc.).
+Event names and Prometheus label layouts are documented in [METRICS.md](METRICS.md).
 
-It is possible to expose measurements compliant with [RFC 2619](https://tools.ietf.org/html/rfc2619) and [RFC 2621](https://tools.ietf.org/html/rfc2621) using
-the build in metrics.
+### Elixir / PromEx
 
-The handle time metrics are generated internally using histograms. These histograms
-all have a time span of 60s. The precise metrics are defined in [include/eradius_metrics.hrl](include/eradius_metrics.hrl).
+Elixir hosts that already use [PromEx](https://hex.pm/packages/prom_ex) can
+attach the optional companion package under [`prom_ex_eradius/`](prom_ex_eradius/):
 
-See more in [METRICS.md](METRICS.md).
+```elixir
+# mix.exs
+{:prom_ex_eradius, path: "deps/eradius/prom_ex_eradius"}  # or git/path
+
+# MyApp.PromEx plugins/0
+PromExEradius
+# or {PromExEradius, metric_prefix: [:my_app, :eradius]}
+```
+
+That plugin only consumes telemetry; it does not require starting the Erlang
+`eradius_prometheus_collector` application.
 
 # RADIUS server configuration
 

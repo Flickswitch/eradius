@@ -48,8 +48,8 @@ start_link() ->
 
 -spec write_request(sender(), #radius_request{}) -> ok.
 write_request(Sender, Request = #radius_request{}) ->
-    case application:get_env(eradius, logging) of
-        {ok, true} ->
+    case application:get_env(eradius, logging, false) of
+        true ->
             Time = calendar:universal_time(),
             gen_server:cast(?SERVER, {write_request, Time, Sender, Request});
         _ ->
@@ -57,11 +57,16 @@ write_request(Sender, Request = #radius_request{}) ->
     end.
 
 -spec collect_meta(sender(),#radius_request{}) -> [{term(),term()}].
-collect_meta({_NASIP, _NASPort, ReqID}, Request) ->
+collect_meta({NASIP, NASPort, ReqID}, Request) ->
     Request_Type = binary_to_list(format_cmd(Request#radius_request.cmd)),
     Request_ID = integer_to_list(ReqID),
     Attrs = Request#radius_request.attrs,
-    [{request_type, Request_Type},{request_id, Request_ID}|[collect_attr(Key, Val) || {Key, Val} <- Attrs]].
+    [{domain, [eradius]},
+     {nas_ip, NASIP},
+     {nas_port, NASPort},
+     {request_type, Request_Type},
+     {request_id, Request_ID}
+     | [collect_attr(Key, Val) || {Key, Val} <- Attrs]].
 
 -spec collect_message(sender(),#radius_request{}) -> iolist().
 collect_message({NASIP, NASPort, ReqID}, Request) ->
@@ -75,7 +80,9 @@ reconfigure() ->
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
-init(_) -> {ok, init_logger()}.
+init(_) ->
+    logger:set_process_metadata(#{domain => [eradius]}),
+    {ok, init_logger()}.
 
 handle_call(reconfigure, _From, State) ->
     file:close(State),
@@ -99,7 +106,8 @@ handle_cast({write_request, Time, Sender, Request}, State) ->
     catch
         _:Error ->
             ?LOG(error, "Failed to log RADIUS request: error: ~p, request: ~p, sender: ~p, "
-                        "logging will be disabled", [Error, Request, Sender]),
+                        "logging will be disabled", [Error, Request, Sender],
+                 #{domain => [eradius]}),
             {noreply, logger_disabled}
     end.
 
@@ -118,18 +126,19 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %% -- init
 init_logger() ->
-    case application:get_env(eradius, logging) of
-        {ok, true} -> init_logfile();
+    case application:get_env(eradius, logging, false) of
+        true -> init_logfile();
         _ -> logger_disabled
     end.
 
 init_logfile() ->
-    {ok, LogFile} = application:get_env(eradius, logfile),
+    LogFile = application:get_env(eradius, logfile, "./radius.log"),
     ok = filelib:ensure_dir(LogFile),
     case file:open(LogFile, [append]) of
         {ok, Fd} -> Fd;
         Error ->
-            ?LOG(error, "Failed to open file ~p (~p)", [LogFile, Error]),
+            ?LOG(error, "Failed to open file ~p (~p)", [LogFile, Error],
+                 #{domain => [eradius]}),
             logger_disabled
     end.
 
@@ -159,7 +168,7 @@ format_cmd(discack)   -> <<"Disconnect-Ack">>;
 format_cmd(discnak)   -> <<"Disconnect-Nak">>.
 
 format_ip(IP) ->
-    list_to_binary(inet_parse:ntoa(IP)).
+    list_to_binary(inet:ntoa(IP)).
 
 format_packet(Request) ->
     Attrs = Request#radius_request.attrs,
@@ -234,7 +243,7 @@ collectable_attr_value(#attribute{type = string}, Value) when is_binary(Value) -
 collectable_attr_value(#attribute{type = string}, Value) when is_list(Value) ->
     Value;
 collectable_attr_value(#attribute{type = ipaddr}, IP) ->
-    inet_parse:ntoa(IP);
+    inet:ntoa(IP);
 collectable_attr_value(#attribute{id = ID, type = integer}, Val) when is_integer(Val) ->
     case eradius_dict:lookup(value, {ID, Val}) of
         #value{name = VName} -> VName;

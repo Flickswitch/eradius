@@ -1,12 +1,18 @@
 {application, eradius_prometheus_collector,
- [{description, "An OTP library"},
+ [{description, "Prometheus scrape collector + telemetry sink for eradius"},
   {vsn, "0.1.0"},
   {registered, []},
+  {mod, {eradius_prometheus_collector_app, []}},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    telemetry,
+    prometheus
    ]},
-  {env,[]},
-  {modules, [eradius_prometheus_collector]},
+  {env, []},
+  {modules, [eradius_prometheus_collector,
+             eradius_prometheus_collector_app,
+             eradius_prometheus_collector_sup,
+             eradius_prometheus_telemetry]},
   {licenses, ["MIT"]}
 ]}.

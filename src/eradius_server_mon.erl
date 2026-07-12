@@ -72,6 +72,7 @@ all_nas_keys() ->
 -record(state, {running}).
 
 init([]) ->
+    logger:set_process_metadata(#{domain => [eradius]}),
     ?NAS_TAB = ets:new(?NAS_TAB, [named_table, protected, {keypos, #nas.key}]),
     case configure(#state{running = []}) of
         {error, invalid_config} -> {stop, invalid_config};
@@ -105,10 +106,10 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %% -- helpers
 
 configure(#state{running = Running}) ->
-    {ok, ConfServList} = application:get_env(servers),
+    ConfServList = application:get_env(eradius, servers, []),
     case eradius_config:validate_config(ConfServList) of
         {invalid, Message} ->
-            ?LOG(error, "Invalid server config, ~s", [Message]),
+            ?LOG(error, "Invalid server config, ~s", [Message], #{domain => [eradius]}),
             {error, invalid_config};
         ServList -> %% list of {ServerName, ServerAddr, NasHandler} tuples
             NasList = lists:flatmap(fun(Server) -> server_naslist(Server) end, ServList),
@@ -152,7 +153,7 @@ update_server(Running, ToStop, ToStart) ->
                 {ServerName, Addr, Pid};
             {error, Error} ->
                 ?LOG(error, "Could not start listener on host: ~s, occurring error: ~p",
-                [printable_peer(IP, Port), Error])
+                     [printable_peer(IP, Port), Error], #{domain => [eradius]})
         end
     end,
     NewStarted = lists:map(fun

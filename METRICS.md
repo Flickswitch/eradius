@@ -1,8 +1,56 @@
 # eradius metrics
 
-`eradius` uses `prometheus.erl` to implement various operation metrics.
+`eradius` emits operational metrics through two complementary paths:
 
-For now, there are 2 groups of metrics:
+1. **Telemetry** (always on) — every counter/histogram/boolean update fires a
+   `telemetry:execute/3` event. Core **never** dual-writes to `prometheus`.
+2. **ETS counters** — counters are stored for pull/read aggregation
+   (`eradius:statistics/1`, multi-node aggregator).
+
+Optional scrapes:
+
+* **Elixir / PromEx** — `prom_ex_eradius` plugin attaches to telemetry events.
+* **Pure Erlang Prometheus** — start `eradius_prometheus_collector`, which
+  attaches `eradius_prometheus_telemetry` (telemetry → prometheus histograms
+  and booleans) and scrapes ETS counters via `prometheus_collector`.
+
+## Telemetry event names
+
+Stable event name prefixes under `[eradius | …]`:
+
+| Event name | Fired by | Measurements | Metadata (typical keys) |
+|------------|----------|--------------|-------------------------|
+| `[eradius, inc_counter, Counter]` | `inc_counter/2` (NAS, client, server) | `#{}` | NAS: `server_name`, `server_ip`, `server_port`, `nas_ip`, `nas_id`; client: `client_name`, `client_ip`, `client_port`, `server_name`, `server_ip`, `server_port`; server: `server_name`, `server_ip`, `server_port` |
+| `[eradius, dec_counter, Counter]` | `dec_counter/2` | `#{}` | same as inc |
+| `[eradius, observe, Name]` | `observe/4`, `observe/5` | `#{value => Ms}` | client or NAS peer fields |
+| `[eradius, boolean, Name]` | `set_boolean_metric/3` | `#{value => boolean()}` | `#{labels => Labels}` |
+
+`Counter` is an atom such as `requests`, `accessAccepts`, `timeouts`,
+`pending`, etc. `Name` is a prometheus-style metric atom such as
+`eradius_request_duration_milliseconds` or `server_status`.
+
+Example handler attachment:
+
+```erlang
+telemetry:attach(
+    <<"my-handler">>,
+    [eradius, inc_counter, requests],
+    fun(_Event, Measurements, Metadata, _Config) ->
+            io:format("requests ~p ~p~n", [Measurements, Metadata])
+    end,
+    undefined).
+```
+
+### Elixir PromEx plugin
+
+For Elixir applications, use the optional `prom_ex_eradius` package in this
+repository (`prom_ex_eradius/`). It implements `PromEx.Plugin` and maps the
+events above to counters / distributions / last-value gauges. See
+`prom_ex_eradius/README.md`.
+
+## Prometheus scrapable metrics
+
+For now, there are 2 groups of scrape metrics:
 
 * `server` (metrics separated per nas and server names)
 * `client`

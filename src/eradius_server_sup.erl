@@ -17,15 +17,18 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 start_instance(_ServerAddr = {ServerName, {IP, Port}}) ->
-    ?LOG(info, "Starting RADIUS Listener at ~s", [printable_peer(IP, Port)]),
+    ?LOG(info, "Starting RADIUS Listener at ~s", [printable_peer(IP, Port)],
+         #{domain => [eradius]}),
     supervisor:start_child(?SERVER, [ServerName, IP, Port]);
 
 start_instance(_ServerAddr = {ServerName, {IP, Port, Opts}}) ->
-    ?LOG(info, "Starting RADIUS Listener at ~s", [printable_peer(IP, Port)]),
+    ?LOG(info, "Starting RADIUS Listener at ~s", [printable_peer(IP, Port)],
+         #{domain => [eradius]}),
     supervisor:start_child(?SERVER, [ServerName, IP, Port, Opts]).
 
 stop_instance(_ServerAddr = {_ServerName, {IP, Port}}, Pid) ->
-    ?LOG(info, "Stopping RADIUS Listener at ~s", [printable_peer(IP, Port)]),
+    ?LOG(info, "Stopping RADIUS Listener at ~s", [printable_peer(IP, Port)],
+         #{domain => [eradius]}),
     supervisor:terminate_child(?SERVER, Pid);
 
 stop_instance(ServerAddr = {_ServerName, {_IP, _Port, _Opts}}, Pid) ->

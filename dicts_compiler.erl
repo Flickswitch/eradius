@@ -217,10 +217,10 @@ pd(["VALUE", Attr, Name, Id], _VendId) ->
 pd(_X, _VendId) -> false.
 
 id2i(Id) ->
-    case catch l2i(Id) of
-        I when is_integer(I) -> I;
-        {'EXIT', _} ->
-            hex2i(Id)
+    try l2i(Id) of
+        I when is_integer(I) -> I
+    catch
+        _:_ -> hex2i(Id)
     end.
 
 hex2i("0x" ++ L) -> erlang:list_to_integer(L, 16).

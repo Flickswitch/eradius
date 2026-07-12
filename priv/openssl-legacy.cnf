@@ -1,0 +1,20 @@
+# OpenSSL 3+ config enabling the legacy provider so MS-CHAP (MD4/DES) works.
+# Used by tests and documented for deployments that need MS-CHAPv1/v2/MPPE.
+#
+#   export OPENSSL_CONF=$PWD/priv/openssl-legacy.cnf
+#   rebar3 ct
+
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+
+[provider_sect]
+default = default_sect
+legacy = legacy_sect
+
+[default_sect]
+activate = 1
+
+[legacy_sect]
+activate = 1
