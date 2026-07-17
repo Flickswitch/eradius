@@ -27,6 +27,7 @@
 all() -> [
     resolve_routes_test,
     validate_arguments_test,
+    validate_route_options_test,
     validate_options_test,
     new_request_test,
     get_key_test,
@@ -133,6 +134,26 @@ validate_options_test(_) ->
     ?equal(false, eradius_proxy:validate_options([abc, abc])),
     ?equal(false, eradius_proxy:validate_options(DefaultOptions ++ [{timeout, "5000"}])),
     ?equal(false, eradius_proxy:validate_options(DefaultOptions ++ [{retries, "5"}])),
+    ?equal(false, eradius_proxy:validate_options(DefaultOptions ++ [{timeout, -1}])),
+    ?equal(false, eradius_proxy:validate_options(DefaultOptions ++ [{retries, -1}])),
+    ok.
+
+validate_route_options_test(_) ->
+    Relay = {eradius_test_handler:localhost(tuple), 1813, <<"secret">>},
+    ?equal(default_route,
+           eradius_proxy:validate_arguments(
+             [{default_route, Relay, [{timeout, -1}]}])),
+    ?equal(default_route,
+           eradius_proxy:validate_arguments(
+             [{default_route, Relay, [{retries, -1}]}])),
+    ?equal(routes,
+           eradius_proxy:validate_arguments(
+             [{default_route, Relay},
+              {routes, [{"test", Relay, [{timeout, -1}]}]}])),
+    ?equal(routes,
+           eradius_proxy:validate_arguments(
+             [{default_route, Relay},
+              {routes, [{"test", Relay, [{retries, -1}]}]}])),
     ok.
 
 new_request_test(_) ->

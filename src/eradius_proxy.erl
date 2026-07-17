@@ -178,10 +178,10 @@ validate_route_options(Options) ->
 
 % @private
 -spec validate_route_option(Key :: atom(), Value :: term()) -> boolean().
-validate_route_option(timeout, Value) when is_integer(Value) ->
-    true;
-validate_route_option(retries, Value) when is_integer(Value) ->
-    true;
+validate_route_option(timeout, Value) ->
+    valid_non_negative_integer(Value);
+validate_route_option(retries, Value) ->
+    valid_non_negative_integer(Value);
 validate_route_option(pool, Value) when is_atom(Value) ->
     true;
 validate_route_option(_, _) ->
@@ -200,9 +200,12 @@ validate_option(type, _Value) -> false;
 validate_option(strip, Value) when is_boolean(Value) -> true;
 validate_option(strip, _Value) -> false;
 validate_option(separator, Value) when is_list(Value) -> true;
-validate_option(timeout, Value) when is_integer(Value) -> true;
-validate_option(retries, Value) when is_integer(Value) -> true;
+validate_option(timeout, Value) -> valid_non_negative_integer(Value);
+validate_option(retries, Value) -> valid_non_negative_integer(Value);
 validate_option(_, _) -> false.
+
+valid_non_negative_integer(Value) when is_integer(Value), Value >= 0 -> true;
+valid_non_negative_integer(_) -> false.
 
 
 % @private
