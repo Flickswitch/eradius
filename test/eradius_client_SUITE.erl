@@ -22,6 +22,7 @@
 -compile(export_all).
 
 -include("test/eradius_test.hrl").
+-include_lib("eradius/include/eradius_lib.hrl").
 
 -define(BAD_SERVER_IP, {eradius_test_handler:localhost(ip), 1820, "secret"}).
 -define(BAD_SERVER_INITIAL_RETRIES, 3).
@@ -55,6 +56,12 @@ all() -> [
     reconf_ports_10,
     wanna_send,
     send_request_failover,
+    failover_preserves_route_options,
+    failover_tracks_final_peer_failure,
+    failover_peer_options_override_route_options,
+    failover_peer_overrides_do_not_leak,
+    failover_supports_hostname_peer,
+    failover_returns_no_active_servers,
     check_upstream_servers
   ].
 
@@ -68,32 +75,32 @@ end_per_suite(_Config) ->
     application:stop(eradius),
     ok.
 
-init_per_testcase(send_request, Config) ->
-    application:stop(eradius),
-    eradius_test_handler:start(),
-    Config;
-init_per_testcase(send_request_failover, Config) ->
-    application:stop(eradius),
-    eradius_test_handler:start(),
-    Config;
-init_per_testcase(check_upstream_servers, Config) ->
-    application:stop(eradius),
-    eradius_test_handler:start(),
-    Config;
-init_per_testcase(_Test, Config) ->
+init_per_testcase(TestCase, Config) ->
+    case uses_test_handler(TestCase) of
+        true ->
+            application:stop(eradius),
+            eradius_test_handler:start();
+        false ->
+            ok
+    end,
     Config.
 
-end_per_testcase(send_request, Config) ->
-    eradius_test_handler:stop(),
-    Config;
-end_per_testcase(send_request_failover, Config) ->
-    eradius_test_handler:stop(),
-    Config;
-end_per_testcase(check_upstream_servers, Config) ->
-    eradius_test_handler:stop(),
-    Config;
-end_per_testcase(_Test, Config) ->
+end_per_testcase(TestCase, Config) ->
+    case uses_test_handler(TestCase) of
+        true -> eradius_test_handler:stop();
+        false -> ok
+    end,
     Config.
+
+uses_test_handler(TestCase) ->
+    lists:member(TestCase, [send_request, send_request_failover,
+                            failover_preserves_route_options,
+                            failover_tracks_final_peer_failure,
+                            failover_peer_options_override_route_options,
+                            failover_peer_overrides_do_not_leak,
+                            failover_supports_hostname_peer,
+                            failover_returns_no_active_servers,
+                            check_upstream_servers]).
 
 %% STUFF
 
@@ -248,6 +255,133 @@ send_request_failover(_Config) ->
     timer:sleep(Timeout * 1000),
     ?equal([?BAD_SERVER_TUPLE], ets:lookup(eradius_client, ?BAD_SERVER_IP_ETS_KEY)),
     ok.
+
+failover_preserves_route_options(_Config) ->
+    ct:timetrap({seconds, 1}),
+    IP = eradius_test_handler:localhost(tuple),
+    FinalPeer = {IP, 1821, "secret"},
+    eradius_client:store_radius_server_from_pool(IP, 1821, 3),
+    Options = [{retries, 1}, {timeout, 10}, {failover, [FinalPeer]}],
+    {{error, timeout}, Duration} = timed_request(?BAD_SERVER_IP, Options),
+    ?equal(true, Duration < 500),
+    ok.
+
+failover_tracks_final_peer_failure(_Config) ->
+    IP = eradius_test_handler:localhost(tuple),
+    FinalPort = 1821,
+    application:set_env(eradius, unreachable_timeout, 1),
+    FinalPeer = {IP, FinalPort, "secret"},
+    eradius_client:store_radius_server_from_pool(IP, FinalPort, 1),
+    Options = [{retries, 1}, {timeout, 10}, {failover, [FinalPeer]}],
+    ?equal({error, timeout},
+           eradius_client:send_request(?BAD_SERVER_IP,
+                                       #radius_request{cmd = request}, Options)),
+    ?equal([], ets:lookup(eradius_client, {IP, FinalPort})),
+    ?equal([{{IP, FinalPort}, 1, 1}],
+           wait_for_upstream_server({IP, FinalPort}, 1500)),
+    ok.
+
+failover_peer_options_override_route_options(_Config) ->
+    IP = eradius_test_handler:localhost(tuple),
+    FinalPort = 1821,
+    ets:delete(eradius_client, ?BAD_SERVER_IP_ETS_KEY),
+    eradius_client:store_radius_server_from_pool(IP, FinalPort, 2),
+    PeerOptions = [{retries, 1}, {timeout, 10}, {server_name, peer_server}],
+    FinalPeer = {IP, FinalPort, "secret", PeerOptions},
+    RouteOptions = [{retries, 3}, {timeout, 1000}, {server_name, route_server},
+                    {client_name, route_client}, {failover, [FinalPeer]}],
+    HandlerId = {?MODULE, failover_peer_options, make_ref()},
+    ok = telemetry:attach(HandlerId, [eradius, inc_counter, requests],
+                          fun (_Event, _Measurements, Metadata, TestPid) ->
+                              TestPid ! {request_metadata, Metadata}
+                          end, self()),
+    try
+        {{error, timeout}, Duration} = timed_request(?BAD_SERVER_IP, RouteOptions),
+        ?equal(true, Duration < 500),
+        Metadata = receive_request_metadata(),
+        ?match(#{server_name := peer_server, client_name := route_client}, Metadata)
+    after
+        telemetry:detach(HandlerId)
+    end,
+    ok.
+
+failover_peer_overrides_do_not_leak(_Config) ->
+    IP = eradius_test_handler:localhost(tuple),
+    ets:delete(eradius_client, ?BAD_SERVER_IP_ETS_KEY),
+    eradius_client:store_radius_server_from_pool(IP, 1821, 2),
+    FirstPeerOptions = [{retries, 1}, {timeout, 10}, {server_name, first_peer}],
+    FirstPeer = {IP, 1821, "secret", FirstPeerOptions},
+    SecondPeer = {IP, 1812, "secret"},
+    RouteOptions = [{retries, 1}, {timeout, 100}, {server_name, route_server},
+                    {client_name, route_client}, {failover, [FirstPeer, SecondPeer]}],
+    HandlerId = {?MODULE, failover_peer_override_leak, make_ref()},
+    ok = telemetry:attach(HandlerId, [eradius, inc_counter, requests],
+                          fun (_Event, _Measurements, Metadata, TestPid) ->
+                              TestPid ! {request_metadata, Metadata}
+                          end, self()),
+    try
+        {ok, Response, Authenticator} =
+            eradius_client:send_request(?BAD_SERVER_IP,
+                                        #radius_request{cmd = request}, RouteOptions),
+        #radius_request{cmd = accept} =
+            eradius_lib:decode_request(Response, <<"secret">>, Authenticator),
+        FirstMetadata = receive_request_metadata(),
+        SecondMetadata = receive_request_metadata(),
+        ?match(#{server_name := first_peer, client_name := route_client}, FirstMetadata),
+        ?match(#{server_name := route_server, client_name := route_client}, SecondMetadata)
+    after
+        telemetry:detach(HandlerId)
+    end,
+    ok.
+
+failover_supports_hostname_peer(_Config) ->
+    ets:delete(eradius_client, ?BAD_SERVER_IP_ETS_KEY),
+    HostnamePeer = {eradius_test_handler:localhost(string), 1812, "secret"},
+    Options = [{retries, 1}, {timeout, 10}, {failover, [HostnamePeer]}],
+    {ok, Response, Authenticator} =
+        eradius_client:send_request(?BAD_SERVER_IP,
+                                    #radius_request{cmd = request}, Options),
+    #radius_request{cmd = accept} =
+        eradius_lib:decode_request(Response, <<"secret">>, Authenticator),
+    ok.
+
+failover_returns_no_active_servers(_Config) ->
+    IP = eradius_test_handler:localhost(tuple),
+    Options = [{failover, [{IP, 1823, "secret"}]}],
+    ?equal(no_active_servers,
+           eradius_client:send_request({IP, 1822, "secret"},
+                                       #radius_request{cmd = request}, Options)),
+    ok.
+
+receive_request_metadata() ->
+    receive
+        {request_metadata, Metadata} ->
+            Metadata
+    after
+        1000 ->
+            ct:fail(request_metadata_timeout)
+    end.
+
+wait_for_upstream_server(Key, Timeout) ->
+    wait_for_upstream_server(Key, Timeout, erlang:monotonic_time(millisecond)).
+
+wait_for_upstream_server(Key, Timeout, Start) ->
+    case ets:lookup(eradius_client, Key) of
+        [] ->
+            case erlang:monotonic_time(millisecond) - Start >= Timeout of
+                true -> [];
+                false ->
+                    timer:sleep(10),
+                    wait_for_upstream_server(Key, Timeout, Start)
+            end;
+        Server ->
+            Server
+    end.
+
+timed_request(Server, Options) ->
+    Start = erlang:monotonic_time(millisecond),
+    Result = eradius_client:send_request(Server, #radius_request{cmd = request}, Options),
+    {Result, erlang:monotonic_time(millisecond) - Start}.
 
 check_upstream_servers(_Config) ->
     ?equal(?RADIUS_SERVERS, ets:tab2list(eradius_client)),

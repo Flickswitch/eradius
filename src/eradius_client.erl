@@ -63,14 +63,18 @@ send_request(NAS, Request) ->
 %   If no answer is received within the specified timeout, the request will be sent again.
 -spec send_request(nas_address(), #radius_request{}, options()) ->
     {ok, binary(), eradius_lib:authenticator()} | {error, 'timeout' | 'socket_down'}.
-send_request({Host, Port, Secret}, Request, Options) 
+send_request(NAS, Request, Options) ->
+    send_request(NAS, Request, Options, Options).
+
+send_request({Host, Port, Secret}, Request, Options, RouteOptions)
   when ?GOOD_CMD(Request) andalso is_binary(Host) ->
-    send_request({erlang:binary_to_list(Host), Port, Secret}, Request, Options);
-send_request({Host, Port, Secret}, Request, Options) 
+    send_request({erlang:binary_to_list(Host), Port, Secret}, Request, Options, RouteOptions);
+send_request({Host, Port, Secret}, Request, Options, RouteOptions)
   when ?GOOD_CMD(Request) andalso is_list(Host) ->
     IP = get_ip(Host),
-    send_request({IP, Port, Secret}, Request, Options);
-send_request({IP, Port, Secret}, Request, Options) when ?GOOD_CMD(Request) andalso is_tuple(IP) ->
+    send_request({IP, Port, Secret}, Request, Options, RouteOptions);
+send_request({IP, Port, Secret}, Request, Options, RouteOptions)
+  when ?GOOD_CMD(Request) andalso is_tuple(IP) ->
     TS1 = erlang:monotonic_time(),
     ServerName = proplists:get_value(server_name, Options, undefined),
     MetricsInfo = make_metrics_info(Options, {IP, Port}),
@@ -83,7 +87,7 @@ send_request({IP, Port, Secret}, Request, Options) when ?GOOD_CMD(Request) andal
         Response = send_request_loop(Socket, ReqId, Peer,
                                      Request#radius_request{reqid = ReqId, secret = Secret},
                                      Retries, Timeout, MetricsInfo),
-        proceed_response(Request, Response, Peer, TS1, MetricsInfo, Options)
+        proceed_response(Request, Response, Peer, TS1, MetricsInfo, Options, RouteOptions)
     end,
     % If we have other RADIUS upstream servers check current one,
     % maybe it is already marked as inactive and try to find another
@@ -99,11 +103,12 @@ send_request({IP, Port, Secret}, Request, Options) when ?GOOD_CMD(Request) andal
                     SendReqFn();
                 {{NewPeerAddr, NewPeerPort, NewPeerSecret, PeerOpts}, NewPool} ->
                     % current server is not in list of active servers, so use another one
+                    PeerOptions = options_for_failover_peer(RouteOptions, PeerOpts, NewPool),
                     send_request({NewPeerAddr, NewPeerPort, NewPeerSecret}, Request,
-                                 [{failover, NewPool} | PeerOpts])
+                                 PeerOptions, RouteOptions)
             end
     end;
-send_request({_IP, _Port, _Secret}, _Request, _Options) ->
+send_request({_IP, _Port, _Secret}, _Request, _Options, _RouteOptions) ->
     error(badarg).
 
 % @equiv send_remote_request(Node, NAS, Request, [])
@@ -153,7 +158,12 @@ send_remote_request(_Node, {_IP, _Port, _Secret}, _Request, _Options) ->
 restore_upstream_server({ServerIP, Port, Retries, InitialRetries}) ->
     ets:insert(?MODULE, {{ServerIP, Port}, Retries, InitialRetries}).
 
-proceed_response(Request, {ok, Response, Secret, Authenticator}, _Peer = {_ServerName, {ServerIP, Port}}, TS1, MetricsInfo, Options) ->
+proceed_response(Request, Response, Peer, TS1, MetricsInfo, Options) ->
+    proceed_response(Request, Response, Peer, TS1, MetricsInfo, Options, Options).
+
+proceed_response(Request, {ok, Response, Secret, Authenticator},
+                 _Peer = {_ServerName, {ServerIP, Port}}, TS1, MetricsInfo,
+                 Options, RouteOptions) ->
     update_client_request(Request#radius_request.cmd, MetricsInfo, erlang:monotonic_time() - TS1, Request),
     update_client_responses(MetricsInfo),
     case eradius_lib:decode_request(Response, Secret, Authenticator) of
@@ -176,28 +186,32 @@ proceed_response(Request, {ok, Response, Secret, Authenticator}, _Peer = {_Serve
             update_client_response(dropped, MetricsInfo, Request),
             ?LOG(error, "~s INF: Noreply for request ~p. Could not decode the response, reason: ~s",
                  [printable_peer(ServerIP, Port), Request, Reason], #{domain => [eradius]}),
-            maybe_failover(Request, noreply, {ServerIP, Port}, Options);
+            maybe_failover(Request, noreply, {ServerIP, Port}, Options, RouteOptions);
         Decoded ->
             update_server_status_metric(ServerIP, Port, true, Options),
             update_client_response(Decoded#radius_request.cmd, MetricsInfo, Request),
             {ok, Response, Authenticator}
     end;
 
-proceed_response(Request, Response, {_ServerName, {ServerIP, Port}}, TS1, MetricsInfo, Options) ->
+proceed_response(Request, Response, {_ServerName, {ServerIP, Port}}, TS1, MetricsInfo,
+                 Options, RouteOptions) ->
     update_client_responses(MetricsInfo),
     update_client_request(Request#radius_request.cmd, MetricsInfo, erlang:monotonic_time() - TS1, Request),
-    maybe_failover(Request, Response, {ServerIP, Port}, Options).
+    maybe_failover(Request, Response, {ServerIP, Port}, Options, RouteOptions).
 
-maybe_failover(Request, Response, {ServerIP, Port}, Options) ->
+maybe_failover(Request, Response, {ServerIP, Port}, Options, RouteOptions) ->
     update_server_status_metric(ServerIP, Port, false, Options),
-    case proplists:get_value(failover, Options, []) of
-        [] ->
+    case proplists:is_defined(failover, Options) of
+        false ->
             Response;
-        UpstreamServers ->
-            handle_failed_request(Request, {ServerIP, Port}, UpstreamServers, Response, Options)
+        true ->
+            UpstreamServers = proplists:get_value(failover, Options, []),
+            handle_failed_request(Request, {ServerIP, Port}, UpstreamServers,
+                                  Response, Options, RouteOptions)
     end.
 
-handle_failed_request(Request, {ServerIP, Port} = _FailedServer, UpstreamServers, Response, Options) ->
+handle_failed_request(Request, {ServerIP, Port} = _FailedServer, UpstreamServers,
+                      Response, Options, RouteOptions) ->
     case ets:lookup(?MODULE, {ServerIP, Port}) of
         [{{ServerIP, Port}, Retries, InitialRetries}] ->
             FailedTries = proplists:get_value(retries, Options, ?DEFAULT_RETRIES),
@@ -222,9 +236,19 @@ handle_failed_request(Request, {ServerIP, Port} = _FailedServer, UpstreamServers
         [] ->
             Response;
         {{NewPeerAddr, NewPeerPort, NewPeerSecret, PeerOpts}, NewPool} ->
+            PeerOptions = options_for_failover_peer(RouteOptions, PeerOpts, NewPool),
             send_request({NewPeerAddr, NewPeerPort, NewPeerSecret}, Request,
-                         [{failover, NewPool} | PeerOpts])
+                         PeerOptions, RouteOptions)
     end.
+
+options_for_failover_peer(RouteOptions, PeerOpts, NewPool) ->
+    OptionsWithNewPool = lists:keystore(failover, 1, RouteOptions, {failover, NewPool}),
+    lists:foldr(fun
+        ({failover, _}, Acc) ->
+            Acc;
+        ({Key, _} = PeerOption, Acc) ->
+            lists:keystore(Key, 1, Acc, PeerOption)
+    end, OptionsWithNewPool, PeerOpts).
 
 % @private
 send_remote_request_loop(ReplyPid, Socket, ReqId, Peer, EncRequest, Retries, Timeout, MetricsInfo) ->

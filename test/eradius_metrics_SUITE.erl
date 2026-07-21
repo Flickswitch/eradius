@@ -34,7 +34,8 @@
 -define(LOCALHOST, eradius_test_handler:localhost(atom)).
 
 %% test callbacks
-all() -> [good_requests, bad_requests, error_requests, request_with_attrs_as_record].
+all() -> [good_requests, bad_requests, error_requests, request_with_attrs_as_record,
+          histogram_native_duration_is_exported_as_milliseconds].
 
 init_per_suite(Config) ->
     application:load(eradius),
@@ -111,6 +112,23 @@ error_requests(_Config) ->
 request_with_attrs_as_record(_Config) ->
     ok = send_request(accreq, eradius_test_handler:localhost(tuple), 1812, ?ATTRS_AS_RECORD, [{server_name, good}, {client_name, test_records}]),
     ok = check_metric(accreq, client_accounting_requests_total, [{server_name, good}, {client_name, test_records}, {acct_type, start}], 1).
+
+histogram_native_duration_is_exported_as_milliseconds(_Config) ->
+    Metric = eradius_client_request_duration_milliseconds,
+    ClientIP = eradius_test_handler:localhost(tuple),
+    MetricsInfo = {{contract_client, ClientIP, undefined},
+                   {contract_server, ClientIP, 1812}},
+    Duration = erlang:convert_time_unit(25, millisecond, native),
+    ok = eradius_counter:observe(Metric, MetricsInfo, Duration, "duration contract"),
+    Values = prometheus_histogram:values(default, Metric),
+    Labels = [{"server_ip", ClientIP}, {"server_port", 1812},
+              {"server_name", contract_server}, {"client_name", contract_client},
+              {"client_ip", ClientIP}],
+    case lists:keyfind(Labels, 1, Values) of
+        {Labels, _Buckets, 25.0} -> ok;
+        Actual -> ct:fail({unexpected_histogram, Actual, Values})
+    end,
+    ok.
 
 %% helpers
 check_single_request(good, EradiusRequestType, _RequestType, _ResponseType) ->
@@ -224,4 +242,3 @@ radius_request(#radius_request{cmd = discreq}, #nas_prop{nas_id = <<"bad_nas">>}
 radius_request(#radius_request{cmd = request}, #nas_prop{nas_id = <<"error_nas">>}, _) ->
     timer:sleep(1500), %% this will by default trigger one resend
     {reply, #radius_request{cmd = accept}}.
-
