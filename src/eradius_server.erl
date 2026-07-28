@@ -242,12 +242,6 @@ do_radius(ServerPid, ServerName, ReqKey, Handler = {HandlerMod, _}, NasProp, {ud
 
 wait_resend_init(ServerPid, ReqKey, FromIP, FromPort, EncReply, ResendTimeout, Retries) ->
     erlang:send_after(ResendTimeout, self(), timeout),
-    %% The handler ran in this process, so its heap is sized to the request's
-    %% peak allocation and holds garbage promoted to the old generation by the
-    %% minor collections that ran during handling. Only a fullsweep reclaims
-    %% that, and with the default fullsweep_after one will not happen on its
-    %% own before the resend timeout expires. Everything needed from here on is
-    %% EncReply plus the arguments below, so sweep before parking.
     erlang:garbage_collect(),
     wait_resend(ServerPid, ReqKey, FromIP, FromPort, EncReply, Retries).
 
