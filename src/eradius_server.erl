@@ -242,6 +242,7 @@ do_radius(ServerPid, ServerName, ReqKey, Handler = {HandlerMod, _}, NasProp, {ud
 
 wait_resend_init(ServerPid, ReqKey, FromIP, FromPort, EncReply, ResendTimeout, Retries) ->
     erlang:send_after(ResendTimeout, self(), timeout),
+    erlang:garbage_collect(),
     wait_resend(ServerPid, ReqKey, FromIP, FromPort, EncReply, Retries).
 
 wait_resend(_ServerPid, _ReqKey, _FromIP, _FromPort, _EncReply, 0) -> ok;
